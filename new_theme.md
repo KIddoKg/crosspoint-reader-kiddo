@@ -1,0 +1,27 @@
+┌─────────────────────────────────┐
+│ Time, temperature    battery    │
+├─────────────────────────────────┤
+│  Sách Gần Đây:                  │
+│  ┌────────┐  ┌────────┐         │
+│  │ Cover  │  │ Cover  │         │
+│  │ Book1  │  │ Book2  │         │
+│  └────────┘  └────────┘         │
+├─────────────────────────────────┤               
+│  ┌────────┐  ┌────────┐         │
+│  │ My.    │  │ Recent │         │
+│  │ Library│  │        │         │
+│  └────────┘  └────────┘         │
+│  ┌────────┐  ┌────────┐         │
+│  │Settings│  │File    │         │
+│  │        │  │Transfer│         │
+│  └────────┘  └────────┘         │
+│  ┌────────┐  ┌────────┐         │
+│  │Features│  │Bluetoth│         │
+│  │        │  │        │         │
+│  └────────┘  └────────┘         │
+├─────────────────────────────────┤
+└─────────────────────────────────┘
+
+Có thể từ theme lyra tạo ra 1 giao diện như này
+│Features│ có 2 mục ngày giờ và thời tiết, Khi không kết nối wifi có thẻ tự chỉnh thời gian ngay và giờ, thời tiết sẽ ko cập nhập nhưng kết nối wifi thì mọi thông tin sẽ được cập nhập ngày, 
+│Bluetoth│ có thẻ scan và kết nối với các thiết bị bluettoh
