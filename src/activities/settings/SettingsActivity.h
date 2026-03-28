@@ -22,6 +22,7 @@ enum class SettingAction {
   CheckForUpdates,
   Language,
   Features,
+  ClearDataSave, // Thêm action mới để reset toàn bộ dữ liệu lưu
 };
 
 struct SettingInfo {

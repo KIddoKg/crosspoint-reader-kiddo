@@ -7,9 +7,10 @@ void ReloadActivity::onEnter() {
   ActivityWithSubactivity::onEnter();
 
   // Launch WiFi selection immediately
+  // autoConnect = true, syncOnConnect = true
   enterNewActivity(new WifiSelectionActivity(renderer, mappedInput, [this](bool connected) {
     onWifiSelectionComplete(connected);
-  }));
+  }, true, true));
 }
 
 void ReloadActivity::onWifiSelectionComplete(bool connected) {

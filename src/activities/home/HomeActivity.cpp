@@ -20,7 +20,7 @@
 #include "util/StringUtils.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 5;  // My Library, Recents, File transfer, Features, Settings
+  int count = 6;  // My Library, Recents, File transfer, Features, Settings, Reload
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -194,9 +194,10 @@ void HomeActivity::loop() {
     const int opdsLibraryIdx = hasOpdsUrl ? idx++ : -1;
     const int fileTransferIdx = idx++;
     const int featuresIdx = idx++;
-    const int settingsIdx = idx;
+    const int settingsIdx = idx++;
+    const int reloadIdx = idx;
 
-    if (selectorIndex < recentBooks.size()) {
+    if (selectorIndex < (int)recentBooks.size()) {
       onSelectBook(recentBooks[selectorIndex].path);
     } else if (menuSelectedIndex == myLibraryIdx) {
       onMyLibraryOpen();
@@ -210,6 +211,8 @@ void HomeActivity::loop() {
       onFeaturesOpen();
     } else if (menuSelectedIndex == settingsIdx) {
       onSettingsOpen();
+    } else if (menuSelectedIndex == reloadIdx) {
+      onReloadOpen();
     }
   }
 }
@@ -230,8 +233,8 @@ void HomeActivity::render(Activity::RenderLock&&) {
 
   // Build menu items dynamically
   std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_FEATURES), tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Library, Recent, Transfer, Wifi, Settings};
+                                        tr(STR_FEATURES), tr(STR_SETTINGS_TITLE), tr(STR_RELOAD)};
+  std::vector<UIIcon> menuIcons = {Book, Recent, Transfer, Library, Settings, Wifi};
 
   if (hasOpdsUrl) {
     // Insert OPDS Browser after My Library
@@ -244,7 +247,7 @@ void HomeActivity::render(Activity::RenderLock&&) {
       Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, pageWidth,
            pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing * 2 +
                          metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()), selectorIndex - recentBooks.size(),
+      static_cast<int>(menuItems.size()), selectorIndex - (int)recentBooks.size(),
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
 

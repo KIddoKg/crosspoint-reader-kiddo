@@ -289,3 +289,25 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
   LOG_DBG("RBS", "Recent books loaded from file (%d entries)", store.getCount());
   return true;
 }
+
+bool JsonSettingsIO::clearDataSave(const char* path) {
+  // Xóa dữ liệu đã lưu bằng cách ghi file rỗng
+  return Storage.writeFile(path, "");
+}
+
+bool JsonSettingsIO::clearAllDataSaves(const char* settingsPath, const char* statePath, const char* wifiPath, const char* recentBooksPath, const char* koreaderPath) {
+    // Sử dụng instance singleton thay vì tạo object mới (do constructor private)
+    CrossPointSettings& defaultSettings = CrossPointSettings::getInstance();
+    CrossPointState defaultState; // Nếu là struct hoặc có public constructor
+    WifiCredentialStore& defaultWifi = WifiCredentialStore::getInstance();
+    RecentBooksStore& defaultRecentBooks = RecentBooksStore::getInstance();
+    KOReaderCredentialStore& defaultKOReader = KOReaderCredentialStore::getInstance();
+
+    bool ok = true;
+    ok &= saveSettings(defaultSettings, settingsPath);
+    ok &= saveState(defaultState, statePath);
+    ok &= saveWifi(defaultWifi, wifiPath);
+    ok &= saveRecentBooks(defaultRecentBooks, recentBooksPath);
+    ok &= saveKOReader(defaultKOReader, koreaderPath);
+    return ok;
+}

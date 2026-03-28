@@ -27,6 +27,8 @@
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
+#include "components/icons/reload24.h"
+#include "components/icons/reload.h"
 #include "fontIds.h"
 #include "util/TimeManager.h"
 
@@ -58,6 +60,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return Book24Icon;
       case UIIcon::File:
         return File24Icon;
+      case UIIcon::Reload:
+        return Reload24Icon;
       default:
         return nullptr;
     }
@@ -86,6 +90,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return Image24Icon;
       case UIIcon::File:
         return File24Icon;
+      case UIIcon::Reload:
+        return ReloadIcon;
       default:
         return nullptr;
     }

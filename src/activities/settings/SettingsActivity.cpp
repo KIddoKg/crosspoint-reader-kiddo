@@ -16,6 +16,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "JsonSettingsIO.h"
 
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
                                                               StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
@@ -53,6 +54,7 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_DATA_SAVE, SettingAction::ClearDataSave));
 
   // Reset selection to first category
   selectedCategoryIndex = 0;
@@ -204,6 +206,18 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::Language:
         enterSubActivity(new LanguageSelectActivity(renderer, mappedInput, onComplete));
         break;
+      case SettingAction::ClearDataSave: {
+        // Đường dẫn file settings/state/wifi/recentbooks/koreader lấy từ macro hoặc truyền vào
+        // Ví dụ giả định các path
+        const char* settingsPath = "/data/settings.json";
+        const char* statePath = "/data/state.json";
+        const char* wifiPath = "/data/wifi.json";
+        const char* recentBooksPath = "/data/recent_books.json";
+        const char* koreaderPath = "/data/koreader.json";
+        JsonSettingsIO::clearAllDataSaves(settingsPath, statePath, wifiPath, recentBooksPath, koreaderPath);
+        // Có thể thêm thông báo thành công ở đây
+        break;
+      }
       case SettingAction::None:
         // Do nothing
         break;

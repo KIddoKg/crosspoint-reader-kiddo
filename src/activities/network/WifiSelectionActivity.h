@@ -69,6 +69,9 @@ class WifiSelectionActivity final : public ActivityWithSubactivity {
   // Whether to attempt auto-connect on entry
   const bool allowAutoConnect;
 
+  // Whether to sync time and weather on connection
+  const bool syncOnConnect;
+
   // Whether we are attempting to auto-connect
   bool autoConnecting = false;
 
@@ -97,10 +100,12 @@ class WifiSelectionActivity final : public ActivityWithSubactivity {
 
  public:
   explicit WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                 const std::function<void(bool connected)>& onComplete, bool autoConnect = true)
+                                 const std::function<void(bool connected)>& onComplete, bool autoConnect = true,
+                                 bool syncOnConnect = false)
       : ActivityWithSubactivity("WifiSelection", renderer, mappedInput),
         onComplete(onComplete),
-        allowAutoConnect(autoConnect) {}
+        allowAutoConnect(autoConnect),
+        syncOnConnect(syncOnConnect) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

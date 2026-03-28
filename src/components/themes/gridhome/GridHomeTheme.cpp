@@ -12,6 +12,10 @@
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
+#include "components/icons/reload.h"
+#include "components/icons/folder.h"
+#include "components/icons/file24.h"
+#include "components/icons/book.h"
 #include "fontIds.h"
 #include "util/TimeManager.h"
 
@@ -24,15 +28,15 @@ constexpr int mainMenuColumns = 2;
 const uint8_t* iconForName(UIIcon icon) {
   switch (icon) {
     case UIIcon::Folder:
-      return nullptr;  // TODO: Add folder icon if needed
+      return FolderIcon;  // TODO: Add folder icon if needed
     case UIIcon::Text:
       return nullptr;
     case UIIcon::Image:
       return nullptr;
     case UIIcon::Book:
-      return nullptr;
+      return BookIcon;
     case UIIcon::File:
-      return nullptr;
+      return File24Icon;
     case UIIcon::Recent:
       return RecentIcon;
     case UIIcon::Settings:
@@ -41,6 +45,9 @@ const uint8_t* iconForName(UIIcon icon) {
       return TransferIcon;
     case UIIcon::Library:
       return LibraryIcon;
+
+    case UIIcon::Reload:
+      return ReloadIcon;
     case UIIcon::Wifi:
       return WifiIcon;
     default:

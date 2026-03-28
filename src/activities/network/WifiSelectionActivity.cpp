@@ -1,3 +1,473 @@
+// #include "WifiSelectionActivity.h"
+
+// #include <GfxRenderer.h>
+// #include <I18n.h>
+// #include <Logging.h>
+// #include <WiFi.h>
+
+// #include <map>
+// #include <algorithm>
+
+// #include "MappedInputManager.h"
+// #include "../../WifiCredentialStore.h"
+// #include "activities/util/KeyboardEntryActivity.h"
+// #include "components/UITheme.h"
+// #include "fontIds.h"
+// #include "util/TimeManager.h"
+// #include "util/WeatherManager.h"
+
+// void WifiSelectionActivity::onEnter() {
+//   Activity::onEnter();
+
+//   {
+//     RenderLock lock(*this);
+//     WIFI_STORE.loadFromFile();
+//   }
+
+//   selectedNetworkIndex = 0;
+//   networks.clear();
+//   state = WifiSelectionState::SCANNING;
+//   selectedSSID.clear();
+//   connectedIP.clear();
+//   connectionError.clear();
+//   enteredPassword.clear();
+//   usedSavedPassword = false;
+//   savePromptSelection = 0;
+//   forgetPromptSelection = 0;
+//   autoConnecting = false;
+
+//   uint8_t mac[6];
+//   WiFi.macAddress(mac);
+//   char macStr[64];
+//   snprintf(macStr, sizeof(macStr), "%s %02x-%02x-%02x-%02x-%02x-%02x", tr(STR_MAC_ADDRESS), mac[0], mac[1], mac[2],
+//            mac[3], mac[4], mac[5]);
+//   cachedMacAddress = std::string(macStr);
+
+//   requestUpdate();
+
+//   if (allowAutoConnect) {
+//     const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
+//     if (!lastSsid.empty()) {
+//       const auto* cred = WIFI_STORE.findCredential(lastSsid);
+//       if (cred) {
+//         LOG_DBG("WIFI", "Attempting to auto-connect to %s", lastSsid.c_str());
+//         selectedSSID = cred->ssid;
+//         enteredPassword = cred->password;
+//         selectedRequiresPassword = !cred->password.empty();
+//         usedSavedPassword = true;
+//         autoConnecting = true;
+//         attemptConnection();
+//         requestUpdate();
+//         return;
+//       }
+//     }
+//   }
+
+//   startWifiScan();
+// }
+
+// void WifiSelectionActivity::onExit() {
+//   Activity::onExit();
+//   WiFi.scanDelete();
+// }
+
+// void WifiSelectionActivity::startWifiScan() {
+//   autoConnecting = false;
+//   state = WifiSelectionState::SCANNING;
+//   networks.clear();
+//   requestUpdate();
+
+//   WiFi.mode(WIFI_STA);
+//   WiFi.disconnect();
+//   delay(100);
+
+//   WiFi.scanNetworks(true);
+// }
+
+// void WifiSelectionActivity::processWifiScanResults() {
+//   const int16_t scanResult = WiFi.scanComplete();
+
+//   if (scanResult == WIFI_SCAN_RUNNING) return;
+
+//   if (scanResult == WIFI_SCAN_FAILED) {
+//     state = WifiSelectionState::NETWORK_LIST;
+//     requestUpdate();
+//     return;
+//   }
+
+//   std::map<std::string, WifiNetworkInfo> uniqueNetworks;
+
+//   for (int i = 0; i < scanResult; i++) {
+//     std::string ssid = WiFi.SSID(i).c_str();
+//     const int32_t rssi = WiFi.RSSI(i);
+
+//     if (ssid.empty()) continue;
+
+//     auto it = uniqueNetworks.find(ssid);
+//     if (it == uniqueNetworks.end() || rssi > it->second.rssi) {
+//       WifiNetworkInfo network;
+//       network.ssid = ssid;
+//       network.rssi = rssi;
+//       network.isEncrypted = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+//       network.hasSavedPassword = WIFI_STORE.hasSavedCredential(network.ssid);
+//       uniqueNetworks[ssid] = network;
+//     }
+//   }
+
+//   networks.clear();
+//   for (const auto& pair : uniqueNetworks) {
+//     networks.push_back(pair.second);
+//   }
+
+//   std::sort(networks.begin(), networks.end(), [](const WifiNetworkInfo& a, const WifiNetworkInfo& b) {
+//     if (a.hasSavedPassword != b.hasSavedPassword) {
+//       return a.hasSavedPassword;
+//     }
+//     return a.rssi > b.rssi;
+//   });
+
+//   WiFi.scanDelete();
+//   state = WifiSelectionState::NETWORK_LIST;
+//   selectedNetworkIndex = 0;
+//   requestUpdate();
+// }
+
+// void WifiSelectionActivity::selectNetwork(const int index) {
+//   if (index < 0 || index >= static_cast<int>(networks.size())) return;
+
+//   const auto& network = networks[index];
+//   selectedSSID = network.ssid;
+//   selectedRequiresPassword = network.isEncrypted;
+//   usedSavedPassword = false;
+//   enteredPassword.clear();
+//   autoConnecting = false;
+
+//   const auto* savedCred = WIFI_STORE.findCredential(selectedSSID);
+//   if (savedCred && !savedCred->password.empty()) {
+//     enteredPassword = savedCred->password;
+//     usedSavedPassword = true;
+//     attemptConnection();
+//     return;
+//   }
+
+//   if (selectedRequiresPassword) {
+//     state = WifiSelectionState::PASSWORD_ENTRY;
+//     enterNewActivity(new KeyboardEntryActivity(
+//         renderer, mappedInput, tr(STR_ENTER_WIFI_PASSWORD),
+//         "", 64, false,
+//         [this](const std::string& text) {
+//           enteredPassword = text;
+//           exitActivity();
+//         },
+//         [this] {
+//           state = WifiSelectionState::NETWORK_LIST;
+//           exitActivity();
+//           requestUpdate();
+//         }));
+//   } else {
+//     attemptConnection();
+//   }
+// }
+
+// void WifiSelectionActivity::attemptConnection() {
+//   state = autoConnecting ? WifiSelectionState::AUTO_CONNECTING : WifiSelectionState::CONNECTING;
+//   connectionStartTime = millis();
+//   connectedIP.clear();
+//   connectionError.clear();
+//   requestUpdate();
+
+//   WiFi.mode(WIFI_STA);
+
+//   if (selectedRequiresPassword && !enteredPassword.empty()) {
+//     WiFi.begin(selectedSSID.c_str(), enteredPassword.c_str());
+//   } else {
+//     WiFi.begin(selectedSSID.c_str());
+//   }
+// }
+
+// void WifiSelectionActivity::checkConnectionStatus() {
+//   if (state != WifiSelectionState::CONNECTING && state != WifiSelectionState::AUTO_CONNECTING) return;
+
+//   const wl_status_t status = WiFi.status();
+
+//   if (status == WL_CONNECTED) {
+//     IPAddress ip = WiFi.localIP();
+//     char ipStr[16];
+//     snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+//     connectedIP = ipStr;
+//     autoConnecting = false;
+
+//     {
+//       RenderLock lock(*this);
+//       WIFI_STORE.setLastConnectedSsid(selectedSSID);
+//     }
+
+//     if (!usedSavedPassword && !enteredPassword.empty()) {
+//       state = WifiSelectionState::SAVE_PROMPT;
+//       savePromptSelection = 0;
+//       requestUpdate();
+//     } else {
+//       onComplete(true);
+//     }
+//     return;
+//   }
+
+//   if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL || (millis() - connectionStartTime > CONNECTION_TIMEOUT_MS)) {
+//     if (status == WL_NO_SSID_AVAIL) {
+//       connectionError = tr(STR_ERROR_NETWORK_NOT_FOUND);
+//     } else if (millis() - connectionStartTime > CONNECTION_TIMEOUT_MS) {
+//       WiFi.disconnect();
+//       connectionError = tr(STR_ERROR_CONNECTION_TIMEOUT);
+//     } else {
+//       connectionError = tr(STR_ERROR_GENERAL_FAILURE);
+//     }
+//     state = WifiSelectionState::CONNECTION_FAILED;
+//     requestUpdate();
+//   }
+// }
+
+// void WifiSelectionActivity::loop() {
+//   if (subActivity) {
+//     subActivity->loop();
+//     return;
+//   }
+
+//   if (state == WifiSelectionState::SCANNING) {
+//     processWifiScanResults();
+//     return;
+//   }
+
+//   if (state == WifiSelectionState::CONNECTING || state == WifiSelectionState::AUTO_CONNECTING) {
+//     checkConnectionStatus();
+//     return;
+//   }
+
+//   if (state == WifiSelectionState::PASSWORD_ENTRY) {
+//     attemptConnection();
+//     return;
+//   }
+
+//   if (state == WifiSelectionState::SAVE_PROMPT) {
+//     if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+//         mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+//       if (savePromptSelection > 0) {
+//         savePromptSelection--;
+//         requestUpdate();
+//       }
+//     } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
+//                mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+//       if (savePromptSelection < 1) {
+//         savePromptSelection++;
+//         requestUpdate();
+//       }
+//     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+//       if (savePromptSelection == 0) {
+//         RenderLock lock(*this);
+//         WIFI_STORE.addCredential(selectedSSID, enteredPassword);
+//       }
+//       onComplete(true);
+//     } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+//       onComplete(true);
+//     }
+//     return;
+//   }
+
+//   if (state == WifiSelectionState::FORGET_PROMPT) {
+//     if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+//         mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+//       if (forgetPromptSelection > 0) {
+//         forgetPromptSelection--;
+//         requestUpdate();
+//       }
+//     } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
+//                mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+//       if (forgetPromptSelection < 1) {
+//         forgetPromptSelection++;
+//         requestUpdate();
+//       }
+//     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+//       if (forgetPromptSelection == 1) {
+//         RenderLock lock(*this);
+//         WIFI_STORE.removeCredential(selectedSSID);
+//         auto it = std::find_if(networks.begin(), networks.end(), [this](const WifiNetworkInfo& net) { return net.ssid == selectedSSID; });
+//         if (it != networks.end()) it->hasSavedPassword = false;
+//       }
+//       startWifiScan();
+//     } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+//       startWifiScan();
+//     }
+//     return;
+//   }
+
+//   if (state == WifiSelectionState::CONNECTED || state == WifiSelectionState::CONNECTION_FAILED) {
+//     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) ||
+//         mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+//       onComplete(state == WifiSelectionState::CONNECTED);
+//     }
+//     return;
+//   }
+
+//   if (state == WifiSelectionState::NETWORK_LIST) {
+//     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+//       onComplete(false);
+//       return;
+//     }
+
+//     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+//       if (!networks.empty()) {
+//         selectNetwork(selectedNetworkIndex);
+//       } else {
+//         startWifiScan();
+//       }
+//       return;
+//     }
+
+//     buttonNavigator.onNext([this] {
+//       selectedNetworkIndex = ButtonNavigator::nextIndex(selectedNetworkIndex, networks.size());
+//       requestUpdate();
+//     });
+
+//     buttonNavigator.onPrevious([this] {
+//       selectedNetworkIndex = ButtonNavigator::previousIndex(selectedNetworkIndex, networks.size());
+//       requestUpdate();
+//     });
+//   }
+// }
+
+// std::string WifiSelectionActivity::getSignalStrengthIndicator(const int32_t rssi) const {
+//   if (rssi >= -50) return "||||";
+//   if (rssi >= -60) return " |||";
+//   if (rssi >= -70) return "  ||";
+//   return "   |";
+// }
+
+// void WifiSelectionActivity::render(Activity::RenderLock&& lock) {
+//   if (state == WifiSelectionState::PASSWORD_ENTRY) {
+//     requestUpdateAndWait();
+//     return;
+//   }
+
+//   renderer.clearScreen();
+
+//   auto metrics = UITheme::getInstance().getMetrics();
+//   const auto pageWidth = renderer.getScreenWidth();
+//   const auto pageHeight = renderer.getScreenHeight();
+
+//   char countStr[32];
+//   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), networks.size());
+//   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_WIFI_NETWORKS),
+//                  countStr);
+//   GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
+//                     cachedMacAddress.c_str());
+
+//   switch (state) {
+//     case WifiSelectionState::AUTO_CONNECTING:
+//     case WifiSelectionState::SCANNING:
+//     case WifiSelectionState::CONNECTING:
+//       renderConnecting();
+//       break;
+//     case WifiSelectionState::NETWORK_LIST:
+//       renderNetworkList();
+//       break;
+//     case WifiSelectionState::CONNECTED:
+//       renderConnected();
+//       break;
+//     case WifiSelectionState::SAVE_PROMPT:
+//       renderSavePrompt();
+//       break;
+//     case WifiSelectionState::CONNECTION_FAILED:
+//       renderConnectionFailed();
+//       break;
+//     case WifiSelectionState::FORGET_PROMPT:
+//       renderForgetPrompt();
+//       break;
+//   }
+
+//   renderer.displayBuffer();
+// }
+
+// void WifiSelectionActivity::renderNetworkList() const {
+//   auto metrics = UITheme::getInstance().getMetrics();
+//   const auto pageWidth = renderer.getScreenWidth();
+//   const auto pageHeight = renderer.getScreenHeight();
+
+//   if (networks.empty()) {
+//     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_NO_NETWORKS));
+//   } else {
+//     int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+//     int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+//     GUI.drawList(
+//         renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(networks.size()),
+//         selectedNetworkIndex, [this](int index) { return networks[index].ssid; }, nullptr, nullptr,
+//         [this](int index) {
+//           auto network = networks[index];
+//           return std::string(network.hasSavedPassword ? "+ " : "") + (network.isEncrypted ? "* " : "") +
+//                  getSignalStrengthIndicator(network.rssi);
+//         });
+//   }
+
+//   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), "", tr(STR_RETRY));
+//   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+// }
+
+// void WifiSelectionActivity::renderConnecting() const {
+//   const auto centerY = renderer.getScreenHeight() / 2;
+//   renderer.drawCenteredText(UI_10_FONT_ID, centerY, state == WifiSelectionState::SCANNING ? tr(STR_SCANNING) : tr(STR_CONNECTING));
+// }
+
+// void WifiSelectionActivity::renderConnected() const {
+//   const auto centerY = renderer.getScreenHeight() / 2;
+//   renderer.drawCenteredText(UI_12_FONT_ID, centerY - 20, tr(STR_CONNECTED), true, EpdFontFamily::BOLD);
+//   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DONE), "", "");
+//   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+// }
+
+// void WifiSelectionActivity::renderSavePrompt() const {
+//   const auto pageWidth = renderer.getScreenWidth();
+//   const auto centerY = renderer.getScreenHeight() / 2;
+//   renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_SAVE_PASSWORD));
+//   const int buttonY = centerY + 40;
+//   if (savePromptSelection == 0) {
+//     renderer.drawText(UI_10_FONT_ID, pageWidth / 2 - 40, buttonY, ("[" + std::string(tr(STR_YES)) + "]").c_str());
+//   } else {
+//     renderer.drawText(UI_10_FONT_ID, pageWidth / 2 - 36, buttonY, tr(STR_YES));
+//   }
+//   if (savePromptSelection == 1) {
+//     renderer.drawText(UI_10_FONT_ID, pageWidth / 2 + 20, buttonY, ("[" + std::string(tr(STR_NO)) + "]").c_str());
+//   } else {
+//     renderer.drawText(UI_10_FONT_ID, pageWidth / 2 + 24, buttonY, tr(STR_NO));
+//   }
+//   const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+//   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+// }
+
+// void WifiSelectionActivity::renderConnectionFailed() const {
+//   const auto centerY = renderer.getScreenHeight() / 2;
+//   renderer.drawCenteredText(UI_12_FONT_ID, centerY - 10, tr(STR_CONNECTION_FAILED), true, EpdFontFamily::BOLD);
+//   renderer.drawCenteredText(UI_10_FONT_ID, centerY + 20, connectionError.c_str());
+//   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DONE), "", "");
+//   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+// }
+
+// void WifiSelectionActivity::renderForgetPrompt() const {
+//   const auto pageWidth = renderer.getScreenWidth();
+//   const auto centerY = renderer.getScreenHeight() / 2;
+//   renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_FORGET_AND_REMOVE));
+//   const int buttonY = centerY + 40;
+//   if (forgetPromptSelection == 0) {
+//     renderer.drawText(UI_10_FONT_ID, pageWidth / 2 - 60, buttonY, ("[" + std::string(tr(STR_CANCEL)) + "]").c_str());
+//   } else {
+//     renderer.drawText(UI_10_FONT_ID, pageWidth / 2 - 56, buttonY, tr(STR_CANCEL));
+//   }
+//   if (forgetPromptSelection == 1) {
+//     renderer.drawText(UI_10_FONT_ID, pageWidth / 2 + 20, buttonY, ("[" + std::string(tr(STR_FORGET_BUTTON)) + "]").c_str());
+//   } else {
+//     renderer.drawText(UI_10_FONT_ID, pageWidth / 2 + 24, buttonY, tr(STR_FORGET_BUTTON));
+//   }
+//   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+//   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+// }
+
 #include "WifiSelectionActivity.h"
 
 #include <GfxRenderer.h>
@@ -12,8 +482,6 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/TimeManager.h"
-#include "util/WeatherManager.h"
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
@@ -242,8 +710,9 @@ void WifiSelectionActivity::checkConnectionStatus() {
     snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
     connectedIP = ipStr;
     autoConnecting = false;
- 
- 
+
+    // Save this as the last connected network - SD card operations need lock as
+    // we use SPI for both
     {
       RenderLock lock(*this);
       WIFI_STORE.setLastConnectedSsid(selectedSSID);
@@ -262,20 +731,6 @@ void WifiSelectionActivity::checkConnectionStatus() {
               "completing immediately");
       onComplete(true);
     }
-
-        // Notify TimeManager to auto-sync time from NTP
-    TimeManager::getInstance().setWiFiConnected(true);
-   xTaskCreate(
-[](void*) {
-    vTaskDelay(pdMS_TO_TICKS(3000));   // ✅ đúng (inside task)
-    WeatherManager::getInstance().setWiFiConnected(true);
-    vTaskDelete(nullptr);
-},
-"WeatherDelay",
-8192,
-nullptr,
-1,
-nullptr);
     return;
   }
 
