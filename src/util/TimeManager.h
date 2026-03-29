@@ -7,7 +7,8 @@ class TimeManager {
   time_t lastSyncTime = 0;
   bool hasWiFi = false;
   bool isTimeSet = false;
-  bool isSyncing = false; // Thêm cờ theo dõi trạng thái đồng bộ NTP
+  bool isSyncing = false;    // Thêm cờ theo dõi trạng thái đồng bộ NTP
+  bool restoredFromRTC = false; // true nếu time được khôi phục từ RTC memory
 
   // When setting manual date/time we store a base time and the system time when it was set
   // so we can advance the manual time as the system clock ticks.
@@ -38,6 +39,11 @@ class TimeManager {
 
   // Restore timezone offset from settings (call during boot)
   void restoreTimezoneFromSettings();
+
+  // RTC Memory persistence: lưu/khôi phục time qua deep sleep
+  void saveTimeToRTC();      // Gọi trước khi vào deep sleep
+  void restoreTimeFromRTC(); // Gọi lúc boot, sau restoreTimezoneFromSettings()
+  bool isRestoredFromRTC() const { return restoredFromRTC; }
 
   void setWiFiConnected(bool connected);
   bool isWiFiConnected() const { return hasWiFi; }

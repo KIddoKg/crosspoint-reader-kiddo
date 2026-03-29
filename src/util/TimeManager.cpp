@@ -8,7 +8,17 @@
 #include <freertos/task.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <esp_sntp.h>
+// GPIO13 hold giữ LDO sống trong deep sleep → RTC domain alive
+// → esp_rtc_get_time_us() đếm đúng qua sleep
+extern "C" uint64_t esp_rtc_get_time_us(void);
 #include "CrossPointSettings.h"
+
+// Biến trong RTC Memory của ESP32-C3 (LP SRAM)
+// → survive deep sleep vì GPIO13 hold giữ LDO sống
+RTC_DATA_ATTR static time_t  g_rtcSavedTime    = 0;
+RTC_DATA_ATTR static bool    g_rtcTimeValid    = false;
+RTC_DATA_ATTR static int64_t g_rtcTimerAtSleep = 0;  // LP timer (us) lúc vào sleep
 
 std::string TimeManager::getCurrentTimeString() const {
   time_t now = getCurrentTime();
@@ -122,25 +132,33 @@ void TimeManager::syncTimeFromNTP() {
           http.end();
         }
         
+        // Khởi động SNTP và cấu hình timezone
         configTime(gmtOffset, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
         SETTINGS.timezoneOffsetSeconds = gmtOffset;
         SETTINGS.saveToFile();
-        
+
+        // Dùng sntp_get_sync_status() thay vì check time() để tránh false-positive
+        // khi time đã hợp lệ từ RTC restore trước đó
         int attempts = 0;
-        time_t now = time(nullptr);
-        while (now < 24 * 3600 && attempts < 300) {
+        while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && attempts < 300) {
           vTaskDelay(pdMS_TO_TICKS(100));
-          now = time(nullptr);
           attempts++;
         }
+        time_t now = time(nullptr);
         
         if (now > 24 * 3600) {
           pThis->lastSyncTime = now;
           pThis->isTimeSet = true;
           SETTINGS.manualTimeBase = now;
           SETTINGS.saveToFile();
+          // Cập nhật RTC memory ngay sau NTP sync để save được time mới nhất
+          g_rtcSavedTime = now;
+          g_rtcTimeValid = true;
+          LOG_INF("TIME", "NTP sync OK: %ld (waited %d*100ms)", (long)now, attempts);
+        } else {
+          LOG_ERR("TIME", "NTP sync FAILED after %d attempts", attempts);
         }
-        pThis->isSyncing = false; // Kết thúc đồng bộ
+        pThis->isSyncing = false;
         vTaskDelete(nullptr);
       },
       "NTPSync",
@@ -151,10 +169,77 @@ void TimeManager::syncTimeFromNTP() {
 }
 
 void TimeManager::restoreTimezoneFromSettings() {
-  if (SETTINGS.timezoneOffsetSeconds != 0) {
-    configTime(SETTINGS.timezoneOffsetSeconds, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+  if (SETTINGS.timezoneOffsetSeconds == 0) return;
+
+  // Chỉ set timezone, KHÔNG gọi configTime()/sntp_init() ở đây
+  // Lý do: configTime() khởi động SNTP trong background và có thể reset time()
+  // về epoch=0 sau khi ta đã settimeofday() từ RTC memory.
+  // SNTP chỉ được start khi WiFi kết nối thực sự (setWiFiConnected(true)).
+  const int offsetSec = SETTINGS.timezoneOffsetSeconds;
+  const int absHours  = abs(offsetSec) / 3600;
+  const int absMins   = (abs(offsetSec) % 3600) / 60;
+  // POSIX TZ: dấu ĐẢO NGƯỢC so với UTC offset
+  // Ví dụ: UTC+7 → "UTC-7"
+  char tzStr[16];
+  if (absMins == 0) {
+    snprintf(tzStr, sizeof(tzStr), "UTC%+d", -(offsetSec / 3600));
+  } else {
+    snprintf(tzStr, sizeof(tzStr), "UTC%c%d:%02d",
+             (offsetSec >= 0 ? '-' : '+'), absHours, absMins);
+  }
+  setenv("TZ", tzStr, 1);
+  tzset();
+  LOG_DBG("TIME", "Timezone set to %s (offset=%ds)", tzStr, offsetSec);
+}
+
+// Lưu time vào RTC Memory trước khi vào deep sleep
+void TimeManager::saveTimeToRTC() {
+  time_t now = time(nullptr);
+  if (now > 24 * 3600LL) {
+    g_rtcSavedTime    = now;
+    g_rtcTimeValid    = true;
+    g_rtcTimerAtSleep = (int64_t)esp_rtc_get_time_us();
+    LOG_INF("TIME", "Saved to RTC: %ld, lpMs=%d", (long)now, (int)(g_rtcTimerAtSleep / 1000));
+  } else if (SETTINGS.manualTimeBase > 24 * 3600LL) {
+    g_rtcSavedTime    = SETTINGS.manualTimeBase;
+    g_rtcTimeValid    = true;
+    g_rtcTimerAtSleep = (int64_t)esp_rtc_get_time_us();
+    LOG_ERR("TIME", "time() invalid, fallback manualTimeBase: %ld", (long)SETTINGS.manualTimeBase);
+  } else {
+    g_rtcTimeValid    = false;
+    g_rtcTimerAtSleep = 0;
+    LOG_ERR("TIME", "No valid time to save");
   }
 }
+
+// Khôi phục time từ RTC Memory sau khi wake up
+void TimeManager::restoreTimeFromRTC() {
+  // Lớp 1: RTC Memory + elapsed (GPIO13 hold đảm bảo LP timer đếm đúng)
+  if (g_rtcTimeValid && g_rtcSavedTime > 24 * 3600LL) {
+    const int64_t nowUs      = (int64_t)esp_rtc_get_time_us();
+    const int64_t elapsedUs  = (g_rtcTimerAtSleep > 0 && nowUs > g_rtcTimerAtSleep)
+                                 ? (nowUs - g_rtcTimerAtSleep) : 0;
+    const time_t  elapsedSec = (time_t)(elapsedUs / 1000000LL);
+    const time_t  restored   = g_rtcSavedTime + elapsedSec;
+    struct timeval tv = {.tv_sec = restored, .tv_usec = 0};
+    settimeofday(&tv, nullptr);
+    isTimeSet       = true;
+    restoredFromRTC = true;
+    LOG_INF("TIME", "Restored: %ld + sleep=%ds = %ld",
+            (long)g_rtcSavedTime, (int)elapsedSec, (long)restored);
+    return;
+  }
+  // Lớp 2: SD card (survive mất nguồn hoàn toàn)
+  if (SETTINGS.manualTimeBase > 24 * 3600LL) {
+    struct timeval tv = {.tv_sec = SETTINGS.manualTimeBase, .tv_usec = 0};
+    settimeofday(&tv, nullptr);
+    isTimeSet = true;
+    LOG_INF("TIME", "Restored from manualTimeBase: %ld", (long)SETTINGS.manualTimeBase);
+    return;
+  }
+  LOG_DBG("TIME", "No valid time (never NTP synced)");
+}
+
 
 int TimeManager::getHour() const {
   time_t now = getCurrentTime();
