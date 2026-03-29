@@ -12,6 +12,7 @@
 #include "fontIds.h"
 #include "util/TimeManager.h"
 #include "util/WeatherManager.h"
+#include "activities/home/ReloadWiFiActivity.h"
 #include "CrossPointSettings.h"
 
 void FeaturesActivity::updateDateTime() {
@@ -116,6 +117,9 @@ void FeaturesActivity::onEnter() {
       LOG_INF("FEAT", "Restored time from settings: %ld", now);
   }
 
+  // Restore selector state based on wifi
+  selectedMenu = wifiConnected ? FeatureMenu::UPDATE : FeatureMenu::DATE;
+
   struct tm* timeinfo = localtime(&now);
   editDay = timeinfo->tm_mday;
   editMonth = timeinfo->tm_mon + 1;  // tm_mon is 0-11
@@ -145,7 +149,22 @@ static int daysInMonth(int year, int month) {
   return d;
 }
 
+void FeaturesActivity::onUpdateAction() {
+  // Clear any existing subactivity
+  exitActivity();
+  // Launch ReloadWiFiActivity as subactivity. When it finishes, destroy it and redraw ourself.
+  enterNewActivity(new ReloadWiFiActivity(renderer, mappedInput, [this]() {
+    exitActivity();
+    requestUpdate();
+  }));
+}
+
 void FeaturesActivity::loop() {
+  if (subActivity) {
+    subActivity->loop();
+    return;
+  }
+
   // Refresh wifi flag periodically
   wifiConnected = TimeManager::getInstance().isWiFiConnected();
 
@@ -256,13 +275,17 @@ void FeaturesActivity::loop() {
       }
 
     } else {  // not editing
-      // Confirm: enter edit mode when selecting DATE/TIME
-      if (confirmPressed && (selectedMenu == FeatureMenu::DATE || selectedMenu == FeatureMenu::TIME)) {
-        editing = true;
-        // Start editing at first sub-field
-        dateField = 0;
-        timeField = 0;
-        requestUpdate();
+      if (confirmPressed) {
+        if (selectedMenu == FeatureMenu::UPDATE) {
+          onUpdateAction();
+          return;
+        } else if (selectedMenu == FeatureMenu::DATE || selectedMenu == FeatureMenu::TIME) {
+          editing = true;
+          // Start editing at first sub-field
+          dateField = 0;
+          timeField = 0;
+          requestUpdate();
+        }
       }
 
       // Navigation between items using Up/Down
@@ -306,7 +329,24 @@ void FeaturesActivity::loop() {
       return;
     }
   } else {
-    // WiFi is connected - still need to handle back button to exit
+    // WiFi is connected - UPDATE action available
+    if (confirmPressed && selectedMenu == FeatureMenu::UPDATE) {
+      onUpdateAction();
+      return;
+    }
+
+    buttonNavigator.onNext([this] {
+      selectedMenu = static_cast<FeatureMenu>(ButtonNavigator::nextIndex(static_cast<int>(selectedMenu),
+                                                                            static_cast<int>(FeatureMenu::COUNT)));
+      requestUpdate();
+    });
+
+    buttonNavigator.onPrevious([this] {
+      selectedMenu = static_cast<FeatureMenu>(ButtonNavigator::previousIndex(static_cast<int>(selectedMenu),
+                                                                                static_cast<int>(FeatureMenu::COUNT)));
+      requestUpdate();
+    });
+
     if (backPressed) {
       onBack();
       return;
@@ -314,7 +354,12 @@ void FeaturesActivity::loop() {
   }
 }
 
-void FeaturesActivity::render(Activity::RenderLock&&) {
+void FeaturesActivity::render(Activity::RenderLock&& lock) {
+  if (subActivity) {
+    subActivity->render(std::move(lock));
+    return;
+  }
+
   renderer.clearScreen();
 
   auto metrics = UITheme::getInstance().getMetrics();
@@ -328,8 +373,9 @@ void FeaturesActivity::render(Activity::RenderLock&&) {
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
 
-  // Create list of feature items - now with 5 items total
+  // Create list of feature items - now with 6 items total
   std::vector<std::string> featureLabels = {
+      std::string(tr(STR_RELOAD)), // Nút bấm
       tr(STR_FEATURES_DATE),
       tr(STR_FEATURES_TIME),
       tr(STR_FEATURES_AREA),
@@ -338,6 +384,7 @@ void FeaturesActivity::render(Activity::RenderLock&&) {
   };
 
   std::vector<std::string> featureValues = {
+      " ", // Trống cho đẹp, icon Reload nằm ở Label rồi
       currentDate,
       currentTime,
       weatherArea,
@@ -350,12 +397,12 @@ void FeaturesActivity::render(Activity::RenderLock&&) {
       renderer,
       Rect{0, contentTop, pageWidth, contentHeight},
       static_cast<int>(featureLabels.size()),
-      wifiConnected ? 0 : static_cast<int>(selectedMenu),  // selectable only when offline
+      static_cast<int>(selectedMenu),  // always selectable now for UPDATE
       [&featureLabels](int index) { return featureLabels[index]; },
       nullptr,
       nullptr,
       [&featureValues](int index) { return featureValues[index]; },
-      !wifiConnected);  // highlight values when editable
+      true);  // highlight selected item
 
   // If editable, draw little indicator for which sub-field is selected
   if ((selectedMenu == FeatureMenu::DATE || selectedMenu == FeatureMenu::TIME)) {
@@ -367,7 +414,7 @@ void FeaturesActivity::render(Activity::RenderLock&&) {
   }
 
   // Draw button hints
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), wifiConnected ? "" : tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

@@ -123,6 +123,5 @@ inline std::vector<SettingInfo> getSettingsList() {
                           StrId::STR_OPDS_BROWSER),
       SettingInfo::String(StrId::STR_PASSWORD, SETTINGS.opdsPassword, sizeof(SETTINGS.opdsPassword), "opdsPassword",
                           StrId::STR_OPDS_BROWSER),
-      SettingInfo::Action(StrId::STR_CLEAR_DATA_SAVE, SettingAction::ClearDataSave),
   };
 }
