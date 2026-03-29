@@ -3,6 +3,7 @@
 #include <Logging.h>
 #include <WiFi.h>
 #include <esp_sleep.h>
+#include <driver/gpio.h>
 
 #include <cassert>
 
@@ -53,6 +54,12 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+  // GPIO13 = LDO EN pin. Nếu không hold, LDO tắt khi deep sleep
+  // → ESP32 mất điện hoàn toàn → RTC domain chết → không thể tính elapsed time
+  // Trade-off: tốn ~4mA trong sleep, pin 650mAh ~ 5 ngày
+  gpio_hold_en(GPIO_NUM_13);
+  gpio_deep_sleep_hold_en();
+
   // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {
     delay(50);

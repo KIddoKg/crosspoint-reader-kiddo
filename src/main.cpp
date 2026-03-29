@@ -203,6 +203,9 @@ void waitForPowerRelease() {
 
 // Enter deep sleep mode
 void enterDeepSleep() {
+  // Lưu time vào RTC Memory trước khi sleep → restore sau khi wake up
+  TimeManager::getInstance().saveTimeToRTC();
+
   APP_STATE.lastSleepFromReader = currentActivity && currentActivity->isReaderActivity();
   APP_STATE.saveToFile();
   exitActivity();
@@ -335,6 +338,9 @@ void setup() {
 
   // Restore timezone from previous WiFi sync (for persistent timezone across reboots)
   TimeManager::getInstance().restoreTimezoneFromSettings();
+  // Khôi phục time từ RTC Memory (thiết bị ngủ và vừa wake up)
+  // Phải gọi SAU restoreTimezoneFromSettings() để giơ hiển thị đúng timezone
+  TimeManager::getInstance().restoreTimeFromRTC();
 
   switch (gpio.getWakeupReason()) {
     case HalGPIO::WakeupReason::PowerButton:

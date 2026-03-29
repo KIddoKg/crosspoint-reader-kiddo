@@ -82,6 +82,9 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["autoPageTurnEnabled"] = s.autoPageTurnEnabled;
   doc["autoPageTurnDelay"] = s.autoPageTurnDelay;
 
+  // Time persistence: lưu timestamp NTP sync cuối cùng để khôi phục sau power-off
+  doc["manualTimeBase"] = (int64_t)s.manualTimeBase;
+
   String json;
   serializeJson(doc, json);
   return Storage.writeFile(path, json);
@@ -141,6 +144,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   // Auto Page Turn settings
   s.autoPageTurnEnabled = clamp(doc["autoPageTurnEnabled"] | (uint8_t)0, 2, 0); // 0=off, 1=on
   s.autoPageTurnDelay = clamp(doc["autoPageTurnDelay"] | (uint8_t)5, 31, 5); // min=5, max=30, default=5
+
+  // Time persistence: khôi phục timestamp NTP sync cuối cùng
+  s.manualTimeBase = (time_t)(doc["manualTimeBase"] | (int64_t)0);
 
   const char* url = doc["opdsServerUrl"] | "";
   strncpy(s.opdsServerUrl, url, sizeof(s.opdsServerUrl) - 1);
