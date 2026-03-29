@@ -28,9 +28,4 @@ bool loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsR
 bool saveRecentBooks(const RecentBooksStore& store, const char* path);
 bool loadRecentBooks(RecentBooksStore& store, const char* json);
 
-// Xóa dữ liệu lưu (ghi file rỗng)
-bool clearDataSave(const char* path);
-// Reset toàn bộ file lưu về mặc định
-bool clearAllDataSaves(const char* settingsPath, const char* statePath, const char* wifiPath, const char* recentBooksPath, const char* koreaderPath);
-
 }  // namespace JsonSettingsIO

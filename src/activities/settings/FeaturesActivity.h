@@ -5,6 +5,7 @@
 
 #include "activities/ActivityWithSubactivity.h"
 #include "util/ButtonNavigator.h"
+#include <vector>
 
 /**
  * FeaturesActivity displays device information:
@@ -23,13 +24,12 @@ class FeaturesActivity final : public ActivityWithSubactivity {
   void loop() override;
   void render(Activity::RenderLock&&) override;
 
+  const std::function<void()> onBack;
  private:
   ButtonNavigator buttonNavigator;
-  const std::function<void()> onBack;
+  enum class FeatureMenu {UPDATE, DATE, TIME, AREA, WEATHER, TEMPERATURE, COUNT };
 
-  enum class FeatureMenu {DATE, TIME, AREA, WEATHER, TEMPERATURE, COUNT };
-
-  FeatureMenu selectedMenu = FeatureMenu::DATE;
+  FeatureMenu selectedMenu = FeatureMenu::UPDATE;
   std::string currentDate;
   std::string currentTime;
   std::string weatherArea;
@@ -52,9 +52,9 @@ class FeaturesActivity final : public ActivityWithSubactivity {
   int dateField = 0;
   int timeField = 0;
 
-  // Whether we're currently editing a sub-field (entered by pressing Confirm on a DATE/TIME item)
   bool editing = false;
 
   void updateDateTime();
   void updateWeather();
+  void onUpdateAction();
 };

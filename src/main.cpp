@@ -262,15 +262,11 @@ void onGoToBrowser() {
   enterNewActivity(new OpdsBookBrowserActivity(renderer, mappedInputManager, onGoHome));
 }
 
-void onGoToReload() {
-  exitActivity();
-  enterNewActivity(new ReloadWiFiActivity(renderer, mappedInputManager, onGoHome));
-}
 
 void onGoHome() {
   exitActivity();
   enterNewActivity(new HomeActivity(renderer, mappedInputManager, onGoToReader, onGoToMyLibrary, onGoToRecentBooks,
-                                    onGoToSettings, onGoToFileTransfer, onGoToBrowser, onGoToFeatures, onGoToReload));
+                                    onGoToSettings, onGoToFileTransfer, onGoToBrowser, onGoToFeatures));
 }
 
 void setupDisplayAndFonts() {
