@@ -50,4 +50,5 @@ class EpubReaderActivity final : public ActivityWithSubactivity {
   void onExit() override;
   void loop() override;
   void render(Activity::RenderLock&& lock) override;
+  bool isReaderActivity() const override { return true; } // Khai báo là Reader Activity
 };

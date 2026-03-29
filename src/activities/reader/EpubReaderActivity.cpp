@@ -120,7 +120,6 @@ void EpubReaderActivity::onExit() {
 }
 
 void EpubReaderActivity::loop() {
-  LOG_DBG("ERS", "AutoPageTurn: enabled=%d, timer=%lu, lastTick=%lu", SETTINGS.autoPageTurnEnabled, autoPageTurnTimer, autoPageTurnLastTick);
   // --- Auto Page Turn ---
   unsigned long now = millis();
   if (SETTINGS.autoPageTurnEnabled) {

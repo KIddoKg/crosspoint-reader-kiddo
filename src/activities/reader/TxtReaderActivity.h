@@ -55,4 +55,5 @@ class TxtReaderActivity final : public ActivityWithSubactivity {
   void onExit() override;
   void loop() override;
   void render(Activity::RenderLock&&) override;
+  bool isReaderActivity() const override { return true; }
 };

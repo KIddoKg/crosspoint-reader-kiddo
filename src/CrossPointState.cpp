@@ -4,6 +4,8 @@
 #include <Logging.h>
 #include <Serialization.h>
 
+#include "JsonSettingsIO.h"
+
 namespace {
 constexpr uint8_t STATE_FILE_VERSION = 4;
 constexpr char STATE_FILE_BIN[] = "/.crosspoint/state.bin";
@@ -15,8 +17,7 @@ CrossPointState CrossPointState::instance;
 
 bool CrossPointState::saveToFile() const {
   Storage.mkdir("/.crosspoint");
-  // JsonSettingsIO::saveState removed
-  return false;
+  return JsonSettingsIO::saveState(*this, STATE_FILE_JSON);
 }
 
 bool CrossPointState::loadFromFile() {
@@ -24,8 +25,10 @@ bool CrossPointState::loadFromFile() {
   if (Storage.exists(STATE_FILE_JSON)) {
     String json = Storage.readFile(STATE_FILE_JSON);
     if (!json.isEmpty()) {
-      // JsonSettingsIO::loadState removed
-      LOG_DBG("CPS", "JSON loading disabled");
+      if (JsonSettingsIO::loadState(*this, json.c_str())) {
+        LOG_DBG("CPS", "Loaded state from JSON");
+        return true;
+      }
     }
   }
 

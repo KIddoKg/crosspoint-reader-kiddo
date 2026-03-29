@@ -36,6 +36,7 @@ void ReloadWiFiActivity::onEnter() {
   usedSavedPassword = false;
   savePromptSelection = 0;
   forgetPromptSelection = 0;
+  syncComplete = false;
 
   // Cache MAC address for display
   uint8_t mac[6];
@@ -71,6 +72,10 @@ void ReloadWiFiActivity::onEnter() {
 void ReloadWiFiActivity::onExit() {
   ActivityWithSubactivity::onExit();
   WiFi.scanDelete();
+  // Đảm bảo tắt WiFi khi thoát
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
+  LOG_INF("WIFI", "WiFi turned OFF on exit to prevent ghosting");
 }
 
 void ReloadWiFiActivity::startWifiScan() {
@@ -195,16 +200,35 @@ void ReloadWiFiActivity::attemptConnection() {
 }
 
 void ReloadWiFiActivity::syncDateTimeAndWeather() {
-    TimeManager::getInstance().setWiFiConnected(true);
+    // Chạy đồng bộ và tắt WiFi ngay khi xong
     xTaskCreate(
-    [](void*) {
-        vTaskDelay(pdMS_TO_TICKS(3000));
+    [](void* param) {
+        ReloadWiFiActivity* pThis = static_cast<ReloadWiFiActivity*>(param);
+
+        LOG_INF("RELOAD", "Sync started");
+
+        // 1. Đồng bộ thời gian
+        TimeManager::getInstance().setWiFiConnected(true);
+        // Chờ đồng bộ NTP xong (isSyncing của TimeManager)
+        while(TimeManager::getInstance().isTimeSyncing()) { vTaskDelay(pdMS_TO_TICKS(100)); }
+
+        // 2. Đồng bộ thời tiết
         WeatherManager::getInstance().setWiFiConnected(true);
+        // Chờ đồng bộ Weather xong (isSyncing của WeatherManager)
+        while(WeatherManager::getInstance().isWeatherSyncing()) { vTaskDelay(pdMS_TO_TICKS(100)); }
+
+        // 3. Tắt WiFi ngay lập tức
+        WiFi.disconnect();
+        WiFi.mode(WIFI_OFF);
+        LOG_INF("RELOAD", "Sync complete, WiFi turned OFF");
+
+        pThis->syncComplete = true;
+        pThis->requestUpdate();
         vTaskDelete(nullptr);
     },
     "ReloadSync",
     8192,
-    nullptr,
+    this,
     1,
     nullptr);
 }
@@ -317,7 +341,12 @@ void ReloadWiFiActivity::loop() {
   if (state == WifiSelectionState::CONNECTED || state == WifiSelectionState::CONNECTION_FAILED) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
         mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      onComplete();
+      // Chỉ cho thoát khi đã đồng bộ xong HOẶC kết nối lỗi
+      if (syncComplete || state == WifiSelectionState::CONNECTION_FAILED) {
+        // Thực hiện Full Refresh trước khi thoát để sạch màn hình hoàn toàn
+        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+        onComplete();
+      }
       return;
     }
   }
@@ -417,12 +446,20 @@ void ReloadWiFiActivity::renderConnecting() const {
 void ReloadWiFiActivity::renderConnected() const {
   const auto centerY = renderer.getScreenHeight() / 2;
   renderer.drawCenteredText(UI_12_FONT_ID, centerY - 30, tr(STR_CONNECTED), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(UI_10_FONT_ID, centerY, "DateTime & Weather Syncing...");
+
+  if (!syncComplete) {
+    renderer.drawCenteredText(UI_10_FONT_ID, centerY, "Syncing Time & Weather...");
+  } else {
+    renderer.drawCenteredText(UI_10_FONT_ID, centerY, "Sync Complete! WiFi OFF.");
+  }
+
   const std::string ipInfo = std::string(tr(STR_IP_ADDRESS_PREFIX)) + connectedIP;
   renderer.drawCenteredText(UI_10_FONT_ID, centerY + 30, ipInfo.c_str());
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (syncComplete) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 }
 
 void ReloadWiFiActivity::renderSavePrompt() const {

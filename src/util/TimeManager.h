@@ -7,6 +7,7 @@ class TimeManager {
   time_t lastSyncTime = 0;
   bool hasWiFi = false;
   bool isTimeSet = false;
+  bool isSyncing = false; // Thêm cờ theo dõi trạng thái đồng bộ NTP
 
   // When setting manual date/time we store a base time and the system time when it was set
   // so we can advance the manual time as the system clock ticks.
@@ -42,6 +43,7 @@ class TimeManager {
   bool isWiFiConnected() const { return hasWiFi; }
   bool hasWiFiConnection() const { return hasWiFi; }  // Alias for convenience
   bool isTimeValid() const { return isTimeSet; }
+  bool isTimeSyncing() const { return isSyncing; } // Kiểm tra đang đồng bộ NTP
 
   // Utility
   int getHour() const;

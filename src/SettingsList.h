@@ -69,7 +69,7 @@ inline std::vector<SettingInfo> getSettingsList() {
       SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
                           StrId::STR_CAT_READER),
       SettingInfo::Toggle(StrId::STR_AUTO_PAGE_TURN, &CrossPointSettings::autoPageTurnEnabled, "autoPageTurnEnabled", StrId::STR_CAT_READER),
-      SettingInfo::Value(StrId::STR_AUTO_PAGE_TURN_DELAY, &CrossPointSettings::autoPageTurnDelay, {5, 20, 1}, "autoPageTurnDelay", StrId::STR_CAT_READER),
+      SettingInfo::Value(StrId::STR_AUTO_PAGE_TURN_DELAY, &CrossPointSettings::autoPageTurnDelay, {5, 30, 1}, "autoPageTurnDelay", StrId::STR_CAT_READER),
 
       // --- Controls ---
       SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,

@@ -25,6 +25,7 @@ class ReloadWiFiActivity final : public ActivityWithSubactivity {
   std::string enteredPassword;
   std::string cachedMacAddress;
   bool usedSavedPassword = false;
+  bool syncComplete = false; // Thêm cờ trạng thái đồng bộ
 
   int savePromptSelection = 0;
   int forgetPromptSelection = 0;
