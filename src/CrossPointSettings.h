@@ -183,6 +183,9 @@ class CrossPointSettings {
   // Độ trễ lật trang tự động (giây), mặc định 1, tối đa 10
   uint8_t autoPageTurnDelay = 1;
 
+  // Save power by turning off RTC during sleep
+  uint8_t timeTrackingInSleep = 0;
+
   // Manual time base for offline persistence
   time_t manualTimeBase = 0;
 

@@ -8,6 +8,7 @@
 #include <cassert>
 
 #include "HalGPIO.h"
+#include "../../src/CrossPointSettings.h"
 
 HalPowerManager powerManager;  // Singleton instance
 
@@ -54,11 +55,20 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
-  // GPIO13 = LDO EN pin. Nếu không hold, LDO tắt khi deep sleep
-  // → ESP32 mất điện hoàn toàn → RTC domain chết → không thể tính elapsed time
-  // Trade-off: tốn ~4mA trong sleep, pin 650mAh ~ 5 ngày
-  gpio_hold_en(GPIO_NUM_13);
-  gpio_deep_sleep_hold_en();
+  if (SETTINGS.timeTrackingInSleep) {
+    // GPIO13 = LDO EN pin. Nếu không hold, LDO tắt khi deep sleep
+    // → ESP32 mất điện hoàn toàn → RTC domain chết → không thể tính elapsed time
+    // Trade-off: tốn ~4mA trong sleep, pin 650mAh ~ 5 ngày
+    gpio_hold_en(GPIO_NUM_13);
+    gpio_deep_sleep_hold_en();
+    LOG_INF("PWR", "RTC domain will be held ON during deep sleep");
+  } else {
+    // If unchecked, release GPIO hold to enter true deep sleep (~20uA)
+    // RTC domain will be turned off and time will be lost until next wifi sync.
+    gpio_hold_dis(GPIO_NUM_13);
+    gpio_deep_sleep_hold_dis();
+    LOG_INF("PWR", "RTC domain will be powered off during deep sleep");
+  }
 
   // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {
