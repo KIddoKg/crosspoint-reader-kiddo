@@ -81,6 +81,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Auto Page Turn settings
   doc["autoPageTurnEnabled"] = s.autoPageTurnEnabled;
   doc["autoPageTurnDelay"] = s.autoPageTurnDelay;
+  doc["timeTrackingInSleep"] = s.timeTrackingInSleep;
 
   // Time persistence: lưu timestamp NTP sync cuối cùng để khôi phục sau power-off
   doc["manualTimeBase"] = (int64_t)s.manualTimeBase;
@@ -144,6 +145,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   // Auto Page Turn settings
   s.autoPageTurnEnabled = clamp(doc["autoPageTurnEnabled"] | (uint8_t)0, 2, 0); // 0=off, 1=on
   s.autoPageTurnDelay = clamp(doc["autoPageTurnDelay"] | (uint8_t)5, 21, 5); // min=5, max=20, default=5
+  s.timeTrackingInSleep = doc["timeTrackingInSleep"] | (uint8_t)0;
 
   // Time persistence: khôi phục timestamp NTP sync cuối cùng
   s.manualTimeBase = (time_t)(doc["manualTimeBase"] | (int64_t)0);
