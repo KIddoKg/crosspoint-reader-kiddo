@@ -23,6 +23,7 @@ class XtcReaderActivity final : public ActivityWithSubactivity {
   // --- Auto Page Turn ---
   unsigned long autoPageTurnTimer = 0;  // ms đã trôi qua
   unsigned long autoPageTurnLastTick = 0;  // tick cuối cùng
+  unsigned long readerEnterTime = 0; // ms lúc vào reader
 
   void renderPage();
   void saveProgress() const;

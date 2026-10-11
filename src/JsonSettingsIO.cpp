@@ -11,6 +11,7 @@
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"
 #include "RecentBooksStore.h"
+#include "ReadingStatsStore.h"
 #include "WifiCredentialStore.h"
 
 // ---- CrossPointState ----
@@ -40,6 +41,62 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.readerActivityLoadCount = doc["readerActivityLoadCount"] | (uint8_t)0;
   s.lastSleepFromReader = doc["lastSleepFromReader"] | false;
   return true;
+}
+
+bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char* path) {
+    JsonDocument doc;
+    doc["totalMinutes"] = store.totalMinutes;
+    doc["lastReadDayIndex"] = store.lastReadDayIndex;
+    doc["currentStreak"] = store.currentStreak;
+
+    JsonArray daily = doc["dailyReadings"].to<JsonArray>();
+    for (const auto& ds : store.dailyReadings) {
+        JsonObject obj = daily.add<JsonObject>();
+        obj["day"] = ds.dayIndex;
+        obj["min"] = ds.minutes;
+    }
+
+    JsonArray books = doc["bookReadings"].to<JsonArray>();
+    for (const auto& bs : store.bookReadings) {
+        JsonObject obj = books.add<JsonObject>();
+        obj["path"] = bs.path;
+        obj["title"] = bs.title;
+        obj["min"] = bs.totalMinutes;
+        obj["progress"] = bs.progress;
+    }
+
+    FsFile file;
+    if (!Storage.openFileForWrite("JSIO", path, file)) return false;
+    serializeJson(doc, file);
+    file.close();
+    return true;
+}
+
+bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* path) {
+    FsFile file;
+    if (!Storage.openFileForRead("JSIO", path, file)) return false;
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+    if (error) return false;
+
+    store.totalMinutes = doc["totalMinutes"] | 0u;
+    store.lastReadDayIndex = doc["lastReadDayIndex"] | 0u;
+    store.currentStreak = doc["currentStreak"] | 0u;
+
+    store.dailyReadings.clear();
+    JsonArray daily = doc["dailyReadings"];
+    for (JsonObject obj : daily) {
+        store.dailyReadings.push_back({obj["day"] | 0u, obj["min"] | 0u});
+    }
+
+    store.bookReadings.clear();
+    JsonArray books = doc["bookReadings"];
+    for (JsonObject obj : books) {
+        store.bookReadings.push_back({obj["path"].as<std::string>(), obj["title"].as<std::string>(), obj["min"] | 0u, obj["progress"] | (uint8_t)0});
+    }
+
+    return true;
 }
 
 // ---- CrossPointSettings ----
@@ -267,6 +324,7 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
     obj["title"] = book.title;
     obj["author"] = book.author;
     obj["coverBmpPath"] = book.coverBmpPath;
+    obj["progress"] = book.progress;
   }
 
   String json;
@@ -291,6 +349,7 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
     book.title = obj["title"] | std::string("");
     book.author = obj["author"] | std::string("");
     book.coverBmpPath = obj["coverBmpPath"] | std::string("");
+    book.progress = obj["progress"] | (uint8_t)0;
     store.recentBooks.push_back(book);
   }
 

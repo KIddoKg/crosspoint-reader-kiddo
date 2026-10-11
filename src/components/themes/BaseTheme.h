@@ -135,4 +135,10 @@ class BaseTheme {
   virtual void drawHelpText(const GfxRenderer& renderer, Rect rect, const char* label) const;
   virtual void drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth) const;
   virtual void drawKeyboardKey(const GfxRenderer& renderer, Rect rect, const char* label, const bool isSelected) const;
+
+  // Recent books list for RecentBooksActivity (overridden by GridHomeTheme for grid layout)
+  virtual void drawRecentBooksList(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
+                                   int selectorIndex) const;
+  virtual int getRecentBooksItemsPerPage(const GfxRenderer& renderer) const;
+  virtual int getRecentBooksColumns() const { return 1; }
 };

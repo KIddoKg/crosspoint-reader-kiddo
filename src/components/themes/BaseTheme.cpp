@@ -757,3 +757,17 @@ void BaseTheme::drawKeyboardKey(const GfxRenderer& renderer, Rect rect, const ch
   }
   renderer.drawText(UI_10_FONT_ID, textX, rect.y, label);
 }
+
+// Default implementation: renders recent books as a standard list (used by Classic/Lyra themes)
+void BaseTheme::drawRecentBooksList(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
+                                    int selectorIndex) const {
+  drawList(
+      renderer, rect, static_cast<int>(recentBooks.size()), selectorIndex,
+      [&recentBooks](int index) { return recentBooks[index].title; },
+      [&recentBooks](int index) { return recentBooks[index].author; },
+      [&recentBooks](int index) { return UITheme::getFileIcon(recentBooks[index].path); });
+}
+
+int BaseTheme::getRecentBooksItemsPerPage(const GfxRenderer& renderer) const {
+  return UITheme::getNumberOfItemsPerPage(renderer, true, false, true, true);
+}

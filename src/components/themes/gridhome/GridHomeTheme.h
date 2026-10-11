@@ -48,4 +48,10 @@ class GridHomeTheme : public LyraTheme {
   void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                       const std::function<std::string(int index)>& buttonLabel,
                       const std::function<UIIcon(int index)>& rowIcon) const override;
+
+  // Override recent books list for 3-column grid layout with covers and progress bars
+  void drawRecentBooksList(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
+                           int selectorIndex) const override;
+  int getRecentBooksItemsPerPage(const GfxRenderer& renderer) const override;
+  int getRecentBooksColumns() const override { return 3; }
 };
