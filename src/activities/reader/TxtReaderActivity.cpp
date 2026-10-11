@@ -11,6 +11,7 @@
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -59,6 +60,9 @@ void TxtReaderActivity::onEnter() {
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(filePath, fileName, "", "");
 
+  // Initialize reading time tracking
+  readerEnterTime = millis();
+
   // Trigger first update
   requestUpdate();
 }
@@ -68,6 +72,23 @@ void TxtReaderActivity::onExit() {
 
   // Reset orientation back to portrait for the rest of the UI
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+
+  // Update reading statistics and progress
+  if (txt && readerEnterTime > 0) {
+    uint8_t progressPercent = 0;
+    if (totalPages > 0) {
+      progressPercent = static_cast<uint8_t>(
+          std::min(100.0f, std::max(0.0f, (currentPage + 1) * 100.0f / totalPages)));
+      RECENT_BOOKS.updateProgress(txt->getPath(), progressPercent);
+    }
+
+    uint32_t elapsedSeconds = (millis() - readerEnterTime) / 1000;
+    uint32_t elapsedMinutes = (elapsedSeconds + 30) / 60; // Round to nearest minute
+    if (elapsedMinutes > 0) {
+      auto fileName = txt->getPath().substr(txt->getPath().rfind('/') + 1);
+      READING_STATS.addReadingTime(txt->getPath(), fileName, elapsedMinutes, progressPercent);
+    }
+  }
 
   pageOffsets.clear();
   currentPageLines.clear();

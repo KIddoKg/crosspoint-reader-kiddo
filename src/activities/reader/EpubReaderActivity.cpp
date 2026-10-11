@@ -16,6 +16,7 @@
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
@@ -103,6 +104,9 @@ void EpubReaderActivity::onEnter() {
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
 
+  // Initialize reading time tracking
+  readerEnterTime = millis();
+
   // Trigger first update
   requestUpdate();
 }
@@ -112,6 +116,23 @@ void EpubReaderActivity::onExit() {
 
   // Reset orientation back to portrait for the rest of the UI
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+
+  // Update reading statistics and progress
+  if (epub && readerEnterTime > 0) {
+    uint8_t progressPercent = 0;
+    if (section && section->pageCount > 0) {
+      const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+      const float bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+      progressPercent = static_cast<uint8_t>(std::min(100.0f, std::max(0.0f, bookProgress + 0.5f)));
+      RECENT_BOOKS.updateProgress(epub->getPath(), progressPercent);
+    }
+
+    uint32_t elapsedSeconds = (millis() - readerEnterTime) / 1000;
+    uint32_t elapsedMinutes = (elapsedSeconds + 30) / 60; // Round to nearest minute
+    if (elapsedMinutes > 0) {
+      READING_STATS.addReadingTime(epub->getPath(), epub->getTitle(), elapsedMinutes, progressPercent);
+    }
+  }
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();

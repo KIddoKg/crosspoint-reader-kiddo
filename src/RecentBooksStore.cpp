@@ -23,15 +23,17 @@ RecentBooksStore RecentBooksStore::instance;
 
 void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author,
                                const std::string& coverBmpPath) {
-  // Remove existing entry if present
+  // Remove existing entry if present, but keep its progress
+  uint8_t oldProgress = 0;
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
+    oldProgress = it->progress;
     recentBooks.erase(it);
   }
 
   // Add to front
-  recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath});
+  recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath, oldProgress});
 
   // Trim to max size
   if (recentBooks.size() > MAX_RECENT_BOOKS) {
@@ -50,6 +52,15 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
     book.title = title;
     book.author = author;
     book.coverBmpPath = coverBmpPath;
+    saveToFile();
+  }
+}
+
+void RecentBooksStore::updateProgress(const std::string& path, uint8_t progress) {
+  auto it =
+      std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
+  if (it != recentBooks.end()) {
+    it->progress = progress;
     saveToFile();
   }
 }
@@ -74,19 +85,19 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
   if (StringUtils::checkFileExtension(lastBookFileName, ".epub")) {
     Epub epub(path, "/.crosspoint");
     epub.load(false, true);
-    return RecentBook{path, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath()};
+    return RecentBook{path, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath(), 0};
   } else if (StringUtils::checkFileExtension(lastBookFileName, ".xtch") ||
              StringUtils::checkFileExtension(lastBookFileName, ".xtc")) {
     // Handle XTC file
     Xtc xtc(path, "/.crosspoint");
     if (xtc.load()) {
-      return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), xtc.getThumbBmpPath()};
+      return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), xtc.getThumbBmpPath(), 0};
     }
   } else if (StringUtils::checkFileExtension(lastBookFileName, ".txt") ||
              StringUtils::checkFileExtension(lastBookFileName, ".md")) {
-    return RecentBook{path, lastBookFileName, "", ""};
+    return RecentBook{path, lastBookFileName, "", "", 0};
   }
-  return RecentBook{path, "", "", ""};
+  return RecentBook{path, "", "", "", 0};
 }
 
 bool RecentBooksStore::loadFromFile() {
@@ -136,7 +147,7 @@ bool RecentBooksStore::loadFromBinaryFile() {
         std::string title, author;
         serialization::readString(inputFile, title);
         serialization::readString(inputFile, author);
-        recentBooks.push_back({path, title, author, ""});
+        recentBooks.push_back({path, title, author, "", 0});
       } else {
         recentBooks.push_back(book);
       }
@@ -162,7 +173,7 @@ bool RecentBooksStore::loadFromBinaryFile() {
         continue;
       }
 
-      recentBooks.push_back({path, title, author, coverBmpPath});
+      recentBooks.push_back({path, title, author, coverBmpPath, 0});
     }
 
     if (omitted > 0) {

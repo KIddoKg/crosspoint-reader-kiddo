@@ -16,6 +16,7 @@
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "ReadingStatsStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -42,12 +43,30 @@ void XtcReaderActivity::onEnter() {
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
 
+  // Initialize reading time tracking
+  readerEnterTime = millis();
+
   // Trigger first update
   requestUpdate();
 }
 
 void XtcReaderActivity::onExit() {
   ActivityWithSubactivity::onExit();
+
+  // Update reading statistics and progress
+  if (xtc && readerEnterTime > 0) {
+    uint8_t progressPercent = 0;
+    if (xtc->getPageCount() > 0) {
+      progressPercent = xtc->calculateProgress(currentPage);
+      RECENT_BOOKS.updateProgress(xtc->getPath(), progressPercent);
+    }
+
+    uint32_t elapsedSeconds = (millis() - readerEnterTime) / 1000;
+    uint32_t elapsedMinutes = (elapsedSeconds + 30) / 60; // Round to nearest minute
+    if (elapsedMinutes > 0) {
+      READING_STATS.addReadingTime(xtc->getPath(), xtc->getTitle(), elapsedMinutes, progressPercent);
+    }
+  }
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();

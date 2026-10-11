@@ -24,6 +24,7 @@
 #include "activities/home/HomeActivity.h"
 #include "activities/home/MyLibraryActivity.h"
 #include "activities/home/RecentBooksActivity.h"
+#include "activities/home/ReadingStatsActivity.h"
 #include "activities/home/ReloadWiFiActivity.h"
 #include "activities/network/CrossPointWebServerActivity.h"
 #include "activities/reader/ReaderActivity.h"
@@ -263,10 +264,15 @@ void onGoToBrowser() {
 }
 
 
+void onGoToReadingStats() {
+  exitActivity();
+  enterNewActivity(new ReadingStatsActivity(renderer, mappedInputManager, onGoHome));
+}
+
 void onGoHome() {
   exitActivity();
   enterNewActivity(new HomeActivity(renderer, mappedInputManager, onGoToReader, onGoToMyLibrary, onGoToRecentBooks,
-                                    onGoToSettings, onGoToFileTransfer, onGoToBrowser, onGoToFeatures));
+                                    onGoToSettings, onGoToFileTransfer, onGoToBrowser, onGoToFeatures, onGoToReadingStats));
 }
 
 void setupDisplayAndFonts() {
