@@ -6,6 +6,27 @@
 #include <algorithm>
 #include <cctype>
 
+#include "CrossPointSettings.h"
+
+// wttr.in location path: the configured city (percent-encoded), or empty to let wttr.in use the request IP
+static std::string locationPath() {
+  static const char hex[] = "0123456789ABCDEF";
+  std::string out;
+  for (const char* p = SETTINGS.weatherCity; *p; ++p) {
+    const auto c = static_cast<unsigned char>(*p);
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      out += static_cast<char>(c);
+    } else if (c == ' ') {
+      out += '+';
+    } else {
+      out += '%';
+      out += hex[c >> 4];
+      out += hex[c & 0x0F];
+    }
+  }
+  return out;
+}
+
 static std::string titleCase(const std::string& str) {
   std::string result = str;
   bool capitalizeNext = true;
@@ -58,7 +79,8 @@ void WeatherManager::fetchWeatherData() {
         http.setTimeout(5000);
         http.setConnectTimeout(5000);
         
-        if (http.begin("http://wttr.in/?format=%l:+%t+%C")) {
+        const std::string url = "http://wttr.in/" + locationPath() + "?format=%l:+%t+%C";
+        if (http.begin(url.c_str())) {
           int httpCode = http.GET();
           
           if (httpCode == HTTP_CODE_OK && !pThis->shouldCancelFetch) {
@@ -95,6 +117,8 @@ void WeatherManager::fetchWeatherData() {
 }
 
 void WeatherManager::setDefaultValues() {
+  // Keep the last real reading (possibly restored from before deep sleep) rather than replacing it with "N/A"
+  if (hasRealData()) return;
   weatherData = "N/A";
 }
 

@@ -9,6 +9,7 @@ class TimeManager {
   bool isTimeSet = false;
   bool isSyncing = false;    // Thêm cờ theo dõi trạng thái đồng bộ NTP
   bool restoredFromRTC = false; // true nếu time được khôi phục từ RTC memory
+  bool approximate = false;     // restored from SD after a sleep without RTC: lags by the sleep duration
 
   // When setting manual date/time we store a base time and the system time when it was set
   // so we can advance the manual time as the system clock ticks.
@@ -49,7 +50,13 @@ class TimeManager {
   bool isWiFiConnected() const { return hasWiFi; }
   bool hasWiFiConnection() const { return hasWiFi; }  // Alias for convenience
   bool isTimeValid() const { return isTimeSet; }
+  // True when the system clock holds a plausible wall-clock time (not the 1970 epoch after a cold boot)
+  bool hasValidClock() const;
+  // Formats the current time as HH:MM; returns false when the clock is not valid
+  bool formatClock(char* buffer, size_t size) const;
   bool isTimeSyncing() const { return isSyncing; } // Kiểm tra đang đồng bộ NTP
+  bool isApproximate() const { return approximate; }
+  time_t getLastSyncTime() const { return lastSyncTime; }
 
   // Utility
   int getHour() const;

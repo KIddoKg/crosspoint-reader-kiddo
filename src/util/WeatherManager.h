@@ -37,6 +37,13 @@ class WeatherManager {
 
   void setCity(const std::string& newCity) { city = newCity; }
 
+  // Seed with the weather saved before the last deep sleep (kept until a fetch replaces it)
+  void restoreCached(const std::string& cached) {
+    if (weatherData.empty()) weatherData = cached;
+  }
+  // Weather worth persisting: a successful fetch, not the "N/A" placeholder
+  bool hasRealData() const { return !weatherData.empty() && weatherData != "N/A"; }
+
  private:
   void setDefaultValues();
   void cancelFetchTask();  // Cancel any in-flight fetch task

@@ -36,6 +36,8 @@ class HalGPIO {
   bool wasAnyPressed() const;
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
+  // True while a button change is mid-debounce; the idle loop polls fast instead of light-sleeping then
+  bool isDebouncePending() const;
   unsigned long getHeldTime() const;
 
   // Check if USB is connected

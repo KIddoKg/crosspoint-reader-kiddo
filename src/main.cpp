@@ -12,12 +12,16 @@
 #include <builtinFonts/all.h>
 
 #include <cstring>
+#include <esp_sleep.h>
+#include <esp_system.h>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "util/BackgroundTimeSync.h"
+#include "util/DebugFileLog.h"
 #include "activities/boot_sleep/BootActivity.h"
 #include "activities/boot_sleep/SleepActivity.h"
 #include "activities/browser/OpdsBookBrowserActivity.h"
@@ -36,6 +40,7 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 #include "util/TimeManager.h"
+#include "util/WeatherManager.h"
 
 HalDisplay display;
 HalGPIO gpio;
@@ -203,11 +208,19 @@ void waitForPowerRelease() {
 }
 
 // Enter deep sleep mode
-void enterDeepSleep() {
+void enterDeepSleep(const char* reason) {
+  DLOG("SLEEP", "enter deep sleep: reason=%s inReader=%d", reason,
+       (currentActivity && currentActivity->isReaderActivity()) ? 1 : 0);
   // Lưu time vào RTC Memory trước khi sleep → restore sau khi wake up
   TimeManager::getInstance().saveTimeToRTC();
 
   APP_STATE.lastSleepFromReader = currentActivity && currentActivity->isReaderActivity();
+  if (TimeManager::getInstance().hasValidClock()) {
+    APP_STATE.lastSleepTime = static_cast<int64_t>(time(nullptr));
+  }
+  if (WeatherManager::getInstance().hasRealData()) {
+    APP_STATE.lastWeather = WeatherManager::getInstance().getWeatherData();
+  }
   APP_STATE.saveToFile();
   exitActivity();
   enterNewActivity(new SleepActivity(renderer, mappedInputManager));
@@ -342,7 +355,18 @@ void setup() {
   TimeManager::getInstance().restoreTimezoneFromSettings();
   // Khôi phục time từ RTC Memory (thiết bị ngủ và vừa wake up)
   // Phải gọi SAU restoreTimezoneFromSettings() để giơ hiển thị đúng timezone
+  APP_STATE.loadFromFile();  // restoreTimeFromRTC() falls back to the last sleep time stored in the app state
   TimeManager::getInstance().restoreTimeFromRTC();
+  WeatherManager::getInstance().restoreCached(APP_STATE.lastWeather);
+
+  {
+    static const char* const wakeNames[] = {"PowerButton", "AfterFlash", "AfterUSBPower", "Other"};
+    const auto wr = static_cast<int>(gpio.getWakeupReason());
+    DLOG("BOOT", "==== boot: wake=%s cause=%d reset=%d usb=%d | shortPwrBtn=%d longPressSkip=%d autoTurn=%d timeInSleep=%d",
+         (wr >= 0 && wr < 4) ? wakeNames[wr] : "?", static_cast<int>(esp_sleep_get_wakeup_cause()),
+         static_cast<int>(esp_reset_reason()), gpio.isUsbConnected() ? 1 : 0, SETTINGS.shortPwrBtn,
+         SETTINGS.longPressChapterSkip, SETTINGS.autoPageTurnEnabled, SETTINGS.timeTrackingInSleep);
+  }
 
   switch (gpio.getWakeupReason()) {
     case HalGPIO::WakeupReason::PowerButton:
@@ -375,6 +399,9 @@ void setup() {
 
   // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
   // crashed (indicated by readerActivityLoadCount > 0)
+  DLOG("BOOT", "state: openEpubPath='%s' lastSleepFromReader=%d loadCount=%d recentBooks=%d",
+       APP_STATE.openEpubPath.c_str(), APP_STATE.lastSleepFromReader ? 1 : 0, APP_STATE.readerActivityLoadCount,
+       RECENT_BOOKS.getCount());
   if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
       mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     onGoHome();
@@ -418,6 +445,11 @@ void loop() {
         uint8_t* buf = display.getFrameBuffer();
         logSerial.write(buf, HalDisplay::BUFFER_SIZE);
         logSerial.printf("SCREENSHOT_END\n");
+      } else if (cmd == "DUMPLOG" || cmd == "DUMPOLDLOG") {
+        const char* path = cmd == "DUMPLOG" ? DEBUG_FILE_LOG_PATH : "/.crosspoint/debug.old.log";
+        logSerial.printf("DUMPLOG_START\n");
+        Storage.readFileToStream(path, logSerial);
+        logSerial.printf("\nDUMPLOG_END\n");
       }
     }
   }
@@ -443,10 +475,18 @@ void loop() {
     screenshotButtonsReleased = true;
   }
 
+  // Background clock sync, once per boot, only after the screen has settled: WiFi needs a lot of heap, so it must
+  // not overlap the first (possibly heavy) chapter layout after waking up
+  static bool backgroundSyncChecked = false;
+  if (!backgroundSyncChecked && millis() - lastActivityTime >= 3000) {
+    backgroundSyncChecked = true;
+    BackgroundTimeSync::maybeStart();
+  }
+
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
-    enterDeepSleep();
+    enterDeepSleep("auto");
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
   }
@@ -456,7 +496,7 @@ void loop() {
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
       return;
     }
-    enterDeepSleep();
+    enterDeepSleep("power-button");
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
   }
@@ -482,12 +522,25 @@ void loop() {
     powerManager.setPowerSaving(false);  // Make sure we're at full performance when skipLoopDelay is requested
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
   } else {
-    if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
-      // If we've been inactive for a while, increase the delay to save power
-      powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
-      delay(50);
+    const unsigned long idleMs = millis() - lastActivityTime;
+    if (idleMs >= HalPowerManager::IDLE_LIGHT_SLEEP_MS) {
+      // Idle: light-sleep between input polls instead of busy-delaying (same poll cadence). The short wake windows
+      // run at normal clock: finishing the per-wake work fast and going back to sleep costs less than running it at
+      // 10 MHz, since the board's sleep floor current is paid per millisecond either way.
+      powerManager.setPowerSaving(false);
+      if (gpio.isDebouncePending()) {
+        // A button change needs a second sample to commit; poll again soon so short taps are not dropped
+        delay(10);
+      } else if (!SETTINGS.lightSleepEnabled || !powerManager.lightSleep(gpio)) {
+        // Declined (render in flight, WiFi or USB active): keep polling at 100 Hz so short power taps still register
+        delay(10);
+      }
     } else {
-      // Short delay to prevent tight loop while still being responsive
+      // Recent input: poll at 100 Hz for snappy interaction, downclocking once a burst of input has settled
+      // (renders re-raise the clock via HalPowerManager::Lock)
+      if (idleMs >= HalPowerManager::IDLE_DOWNCLOCK_MS) {
+        powerManager.setPowerSaving(true);
+      }
       delay(10);
     }
   }

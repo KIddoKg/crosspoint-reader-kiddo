@@ -7,7 +7,8 @@ struct RecentBook {
   std::string title;
   std::string author;
   std::string coverBmpPath;
-  uint8_t progress = 0;
+  uint8_t progress = 0;  // current position (percent)
+  uint8_t furthest = 0;  // furthest point reached by reading forward (percent), see FurthestProgress
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
@@ -39,7 +40,9 @@ class RecentBooksStore {
                   const std::string& coverBmpPath);
 
   // Update progress of a recent book
-  void updateProgress(const std::string& path, uint8_t progress);
+  void updateProgress(const std::string& path, uint8_t progress, uint8_t furthest);
+  // Furthest percent stored for a book, or 0 when the book is not in the list
+  uint8_t getFurthest(const std::string& path) const;
 
   // Get the list of recent books (most recent first)
   const std::vector<RecentBook>& getBooks() const { return recentBooks; }

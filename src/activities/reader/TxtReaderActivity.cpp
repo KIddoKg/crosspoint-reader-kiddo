@@ -10,10 +10,12 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "ProgressFile.h"
 #include "RecentBooksStore.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TimeManager.h"
 
 namespace {
 constexpr unsigned long goHomeMs = 1000;
@@ -52,6 +54,7 @@ void TxtReaderActivity::onEnter() {
   }
 
   txt->setupCacheDir();
+  furthestProgress.load(txt->getCachePath());
 
   // Save current txt as last opened file and add to recent books
   auto filePath = txt->getPath();
@@ -59,6 +62,7 @@ void TxtReaderActivity::onEnter() {
   APP_STATE.openEpubPath = filePath;
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(filePath, fileName, "", "");
+  furthestProgress.seedIfMissing(RECENT_BOOKS.getFurthest(filePath));
 
   // Initialize reading time tracking
   readerEnterTime = millis();
@@ -79,14 +83,17 @@ void TxtReaderActivity::onExit() {
     if (totalPages > 0) {
       progressPercent = static_cast<uint8_t>(
           std::min(100.0f, std::max(0.0f, (currentPage + 1) * 100.0f / totalPages)));
-      RECENT_BOOKS.updateProgress(txt->getPath(), progressPercent);
+    }
+    const uint8_t furthestPercent = furthestProgress.get(progressPercent);
+    if (totalPages > 0) {
+      RECENT_BOOKS.updateProgress(txt->getPath(), progressPercent, furthestPercent);
     }
 
     uint32_t elapsedSeconds = (millis() - readerEnterTime) / 1000;
     uint32_t elapsedMinutes = (elapsedSeconds + 30) / 60; // Round to nearest minute
     if (elapsedMinutes > 0) {
       auto fileName = txt->getPath().substr(txt->getPath().rfind('/') + 1);
-      READING_STATS.addReadingTime(txt->getPath(), fileName, elapsedMinutes, progressPercent);
+      READING_STATS.addReadingTime(txt->getPath(), fileName, elapsedMinutes, furthestPercent);
     }
   }
 
@@ -98,30 +105,19 @@ void TxtReaderActivity::onExit() {
 }
 
 void TxtReaderActivity::loop() {
-  LOG_DBG("TXT", "AutoPageTurn: enabled=%d, timer=%lu, lastTick=%lu", SETTINGS.autoPageTurnEnabled, autoPageTurnTimer, autoPageTurnLastTick);
-  // --- Auto Page Turn ---
-  unsigned long now = millis();
-  if (SETTINGS.autoPageTurnEnabled) {
-    if (autoPageTurnLastTick == 0) autoPageTurnLastTick = now;
-    autoPageTurnTimer += (now - autoPageTurnLastTick);
-    autoPageTurnLastTick = now;
-    unsigned long delayMs = SETTINGS.autoPageTurnDelay * 1000;
-    if (autoPageTurnTimer >= delayMs) {
-      // Tự động sang trang nếu chưa ở cuối sách
-      if (currentPage < totalPages - 1) {
-        currentPage++;
-        requestUpdate();
-      }
-      autoPageTurnTimer = 0;
-    }
-  } else {
-    autoPageTurnTimer = 0;
-    autoPageTurnLastTick = now;
-  }
-
   if (subActivity) {
     subActivity->loop();
     return;
+  }
+
+  // --- Auto Page Turn (only while the page itself is shown, never behind a menu) ---
+  if (mappedInput.wasAnyPressed()) {
+    autoPageTurner.onUserInput();
+  }
+  if (autoPageTurner.shouldTurnPage() && currentPage < totalPages - 1) {
+    furthestProgress.markSequentialAdvance();
+    currentPage++;
+    requestUpdate();
   }
 
   // Long press BACK (1s+) goes to file selection
@@ -158,13 +154,10 @@ void TxtReaderActivity::loop() {
     currentPage--;
     requestUpdate();
   } else if (nextTriggered && currentPage < totalPages - 1) {
+    furthestProgress.markSequentialAdvance();
+    READING_STATS.notePageTurn();
     currentPage++;
     requestUpdate();
-  }
-
-  if (prevTriggered || nextTriggered) {
-    autoPageTurnTimer = 0;
-    autoPageTurnLastTick = millis();
   }
 }
 
@@ -420,6 +413,7 @@ void TxtReaderActivity::render(Activity::RenderLock&&) {
 
   // Save progress
   saveProgress();
+  furthestProgress.onPageShown((currentPage + 1) * 100 / totalPages);
 }
 
 void TxtReaderActivity::renderPage() {
@@ -553,11 +547,9 @@ void TxtReaderActivity::renderStatusBar(const int orientedMarginRight, const int
 
   // Display time on right side for TIME_CHAPTER_BAR mode
   if (showTimeChapterBar) {
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-    char timeStr[16];
-    strftime(timeStr, sizeof(timeStr), "%H:%M", timeinfo);
-    
+    char timeStr[16] = "--:--";
+    TimeManager::getInstance().formatClock(timeStr, sizeof(timeStr));
+
     timeTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeStr);
     renderer.drawText(SMALL_FONT_ID, renderer.getScreenWidth() - orientedMarginRight - timeTextWidth, textY,
                       timeStr);
@@ -600,16 +592,12 @@ void TxtReaderActivity::renderStatusBar(const int orientedMarginRight, const int
 }
 
 void TxtReaderActivity::saveProgress() const {
-  FsFile f;
-  if (Storage.openFileForWrite("TRS", txt->getCachePath() + "/progress.bin", f)) {
-    uint8_t data[4];
-    data[0] = currentPage & 0xFF;
-    data[1] = (currentPage >> 8) & 0xFF;
-    data[2] = 0;
-    data[3] = 0;
-    f.write(data, 4);
-    f.close();
-  }
+  uint8_t data[4];
+  data[0] = currentPage & 0xFF;
+  data[1] = (currentPage >> 8) & 0xFF;
+  data[2] = 0;
+  data[3] = 0;
+  ProgressFile::writeAtomic(txt->getCachePath(), data, sizeof(data));
 }
 
 void TxtReaderActivity::loadProgress() {

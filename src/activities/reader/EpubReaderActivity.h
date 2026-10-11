@@ -1,4 +1,7 @@
 #pragma once
+#include "BookmarkStore.h"
+#include "FurthestProgress.h"
+#include "util/AutoPageTurner.h"
 #include <Epub.h>
 #include <Epub/Section.h>
 
@@ -24,10 +27,9 @@ class EpubReaderActivity final : public ActivityWithSubactivity {
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   const std::function<void()> onGoBack;
   const std::function<void()> onGoHome;
-
-  // --- Auto Page Turn ---
-  unsigned long autoPageTurnTimer = 0; // ms đã trôi qua
-  unsigned long autoPageTurnLastTick = 0; // tick cuối cùng
+  AutoPageTurner autoPageTurner;
+  FurthestProgress furthestProgress;
+  BookmarkStore bookmarks;
   unsigned long readerEnterTime = 0; // ms lúc vào reader
 
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,

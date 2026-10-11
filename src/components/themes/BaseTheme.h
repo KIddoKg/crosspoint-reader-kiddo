@@ -123,6 +123,10 @@ class BaseTheme {
                              const char* rightLabel = nullptr) const;
   virtual void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
                           bool selected) const;
+  // Index of the first tab to draw so the selected tab fits in `availableWidth` (tabs scroll horizontally when
+  // they do not all fit). `tabWidths` include each tab's own padding; `spacing` is the gap between tabs.
+  static size_t firstVisibleTab(const std::vector<int>& tabWidths, const std::vector<TabInfo>& tabs, int spacing,
+                                int availableWidth);
   virtual void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                    const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                    bool& bufferRestored, std::function<bool()> storeCoverBuffer) const;

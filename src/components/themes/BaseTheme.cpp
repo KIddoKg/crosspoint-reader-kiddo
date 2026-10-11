@@ -306,6 +306,25 @@ void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char
   renderer.drawText(UI_12_FONT_ID, currentX, rect.y, truncatedLabel.c_str(), true, EpdFontFamily::REGULAR);
 }
 
+size_t BaseTheme::firstVisibleTab(const std::vector<int>& tabWidths, const std::vector<TabInfo>& tabs,
+                                  const int spacing, const int availableWidth) {
+  size_t selectedIndex = 0;
+  for (size_t i = 0; i < tabs.size(); i++) {
+    if (tabs[i].selected) selectedIndex = i;
+  }
+  // Drop tabs from the left until everything up to and including the selected tab fits
+  size_t first = 0;
+  while (first < selectedIndex) {
+    int width = 0;
+    for (size_t i = first; i <= selectedIndex; i++) {
+      width += tabWidths[i] + (i > first ? spacing : 0);
+    }
+    if (width <= availableWidth) break;
+    first++;
+  }
+  return first;
+}
+
 void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const std::vector<TabInfo>& tabs,
                            bool selected) const {
   constexpr int underlineHeight = 2;  // Height of selection underline
@@ -313,11 +332,20 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
 
   const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
 
+  std::vector<int> widths;
+  widths.reserve(tabs.size());
+  for (const auto& tab : tabs) {
+    widths.push_back(renderer.getTextWidth(UI_12_FONT_ID, tab.label,
+                                           tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR));
+  }
+  const size_t firstTab = firstVisibleTab(widths, tabs, BaseMetrics::values.tabSpacing,
+                                          rect.width - 2 * BaseMetrics::values.contentSidePadding);
+
   int currentX = rect.x + BaseMetrics::values.contentSidePadding;
 
-  for (const auto& tab : tabs) {
-    const int textWidth =
-        renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+  for (size_t i = firstTab; i < tabs.size(); i++) {
+    const auto& tab = tabs[i];
+    const int textWidth = widths[i];
 
     // Draw underline for selected tab
     if (tab.selected) {

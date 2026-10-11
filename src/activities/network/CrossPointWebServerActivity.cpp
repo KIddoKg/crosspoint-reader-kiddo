@@ -1,4 +1,5 @@
 #include "CrossPointWebServerActivity.h"
+#include "util/BackgroundTimeSync.h"
 
 #include <DNSServer.h>
 #include <ESPmDNS.h>
@@ -34,6 +35,7 @@ constexpr uint16_t DNS_PORT = 53;
 
 void CrossPointWebServerActivity::onEnter() {
   ActivityWithSubactivity::onEnter();
+  BackgroundTimeSync::stop();  // take WiFi over from a background clock sync, if one is running
 
   LOG_DBG("WEBACT", "Free heap at onEnter: %d bytes", ESP.getFreeHeap());
 

@@ -1,4 +1,5 @@
 #include "ReloadWiFiActivity.h"
+#include "util/BackgroundTimeSync.h"
 
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -8,6 +9,7 @@
 #include <map>
 #include <algorithm>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "../../WifiCredentialStore.h"
 #include "../util/KeyboardEntryActivity.h"
@@ -18,6 +20,7 @@
 
 void ReloadWiFiActivity::onEnter() {
   Activity::onEnter();
+  BackgroundTimeSync::stop();  // take WiFi over from a background clock sync, if one is running
 
   // Load saved WiFi credentials
   {
@@ -212,10 +215,12 @@ void ReloadWiFiActivity::syncDateTimeAndWeather() {
         // Chờ đồng bộ NTP xong (isSyncing của TimeManager)
         while(TimeManager::getInstance().isTimeSyncing()) { vTaskDelay(pdMS_TO_TICKS(100)); }
 
-        // 2. Đồng bộ thời tiết
-        WeatherManager::getInstance().setWiFiConnected(true);
-        // Chờ đồng bộ Weather xong (isSyncing của WeatherManager)
-        while(WeatherManager::getInstance().isWeatherSyncing()) { vTaskDelay(pdMS_TO_TICKS(100)); }
+        // 2. Đồng bộ thời tiết (skipped when disabled in Settings > Extras)
+        if (SETTINGS.weatherEnabled) {
+          WeatherManager::getInstance().setWiFiConnected(true);
+          // Chờ đồng bộ Weather xong (isSyncing của WeatherManager)
+          while(WeatherManager::getInstance().isWeatherSyncing()) { vTaskDelay(pdMS_TO_TICKS(100)); }
+        }
 
         // 3. Tắt WiFi ngay lập tức
         WiFi.disconnect();

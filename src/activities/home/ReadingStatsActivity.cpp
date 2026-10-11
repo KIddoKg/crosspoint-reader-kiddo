@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 
 #include "ReadingStatsStore.h"
+#include "activities/reader/FurthestProgress.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -99,6 +100,12 @@ void ReadingStatsActivity::render(Activity::RenderLock&&) {
   int streakTextY = streakRect.y + 35 + (gridHeight - 35 - textHeight) / 2;
   renderer.drawText(UI_12_FONT_ID, streakRect.x + (rightWidth - textWidth) / 2, streakTextY, buf);
 
+  // Books read to the end, at the bottom of the streak block
+  snprintf(buf, sizeof(buf), "%s: %u", tr(STR_BOOKS_FINISHED), static_cast<unsigned>(READING_STATS.getFinishedCount()));
+  auto finishedText = renderer.truncatedText(UI_10_FONT_ID, buf, rightWidth - 16);
+  renderer.drawText(UI_10_FONT_ID, streakRect.x + 8, streakRect.y + gridHeight - renderer.getLineHeight(UI_10_FONT_ID) - 8,
+                    finishedText.c_str());
+
   // 4. Most Read Books
   const int booksTop = contentTop + gridHeight + 55; // Increased margin from boxes
   renderer.drawText(UI_12_FONT_ID, sideMargin, booksTop, tr(STR_MOST_READ_BOOKS));
@@ -126,8 +133,12 @@ void ReadingStatsActivity::render(Activity::RenderLock&&) {
           renderer.drawText(UI_10_FONT_ID, timeX, itemY, timeBuf);
           
           // Progress string (to the left of time)
-          char progBuf[16];
-          snprintf(progBuf, sizeof(progBuf), "%d%%", topBooks[i].progress);
+          char progBuf[32];
+          if (topBooks[i].progress >= FurthestProgress::FINISHED_PERCENT) {
+              snprintf(progBuf, sizeof(progBuf), "%s", tr(STR_BOOK_FINISHED));
+          } else {
+              snprintf(progBuf, sizeof(progBuf), "%d%%", topBooks[i].progress);
+          }
           int progWidth = renderer.getTextWidth(UI_10_FONT_ID, progBuf);
           int progX = timeX - progWidth - 15; // 15px gap
           renderer.drawText(UI_10_FONT_ID, progX, itemY, progBuf);

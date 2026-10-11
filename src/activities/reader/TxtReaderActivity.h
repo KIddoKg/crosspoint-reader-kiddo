@@ -1,5 +1,7 @@
 #pragma once
 
+#include "FurthestProgress.h"
+#include "util/AutoPageTurner.h"
 #include <Txt.h>
 
 #include <vector>
@@ -28,10 +30,8 @@ class TxtReaderActivity final : public ActivityWithSubactivity {
   int cachedFontId = 0;
   int cachedScreenMargin = 0;
   uint8_t cachedParagraphAlignment = CrossPointSettings::LEFT_ALIGN;
-
-  // --- Auto Page Turn ---
-  unsigned long autoPageTurnTimer = 0;  // ms đã trôi qua
-  unsigned long autoPageTurnLastTick = 0;  // tick cuối cùng
+  AutoPageTurner autoPageTurner;
+  FurthestProgress furthestProgress;
   unsigned long readerEnterTime = 0; // ms lúc vào reader
 
   void renderPage();

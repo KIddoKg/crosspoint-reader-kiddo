@@ -29,6 +29,13 @@ class HomeActivity final : public Activity {
   const std::function<void()> onFeaturesOpen;
   const std::function<void()> onReadingStatsOpen;
 
+  struct MenuEntry {
+    const char* label;
+    int icon;  // UIIcon
+    std::function<void()> open;
+  };
+  // Menu entries below the recent books; optional ones depend on settings (Settings > Extras) and OPDS config
+  std::vector<MenuEntry> buildMenuEntries() const;
   int getMenuItemCount() const;
   bool storeCoverBuffer();    // Store frame buffer for cover image
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover

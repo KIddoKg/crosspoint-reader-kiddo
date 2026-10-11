@@ -10,7 +10,9 @@
 #include "components/themes/BaseTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
+#include "components/themes/desk/DeskTheme.h"
 #include "components/themes/gridhome/GridHomeTheme.h"
+#include "components/themes/minimal/MinimalTheme.h"
 #include "util/StringUtils.h"
 
 namespace {
@@ -50,6 +52,16 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       LOG_DBG("UI", "Using Grid Home theme");
       currentTheme = std::make_unique<GridHomeTheme>();
       currentMetrics = &GridHomeMetrics::values;
+      break;
+    case CrossPointSettings::UI_THEME::DESK:
+      LOG_DBG("UI", "Using Desk theme");
+      currentTheme = std::make_unique<DeskTheme>();
+      currentMetrics = &DeskMetrics::values;
+      break;
+    case CrossPointSettings::UI_THEME::MINIMAL:
+      LOG_DBG("UI", "Using Minimal theme");
+      currentTheme = std::make_unique<MinimalTheme>();
+      currentMetrics = &MinimalMetrics::values;
       break;
   }
 }

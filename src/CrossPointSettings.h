@@ -1,10 +1,9 @@
 #pragma once
+#include <HalStorage.h>
+
 #include <cstdint>
 #include <ctime>
 #include <iosfwd>
-
-// Forward declarations
-class FsFile;
 
 class CrossPointSettings {
  private:
@@ -26,6 +25,7 @@ class CrossPointSettings {
     COVER = 3,
     BLANK = 4,
     COVER_CUSTOM = 5,
+    DASHBOARD = 6,  // current book, date with lunar date, weather and today's reading
     SLEEP_SCREEN_MODE_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
@@ -122,7 +122,7 @@ class CrossPointSettings {
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, GRID_HOME = 3 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, GRID_HOME = 3, DESK = 4, MINIMAL = 5 };
 
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
@@ -177,14 +177,36 @@ class CrossPointSettings {
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)
   uint8_t embeddedStyle = 1;
 
-  // --- Auto Page Turn ---
-  // 0 = tắt, 1 = bật
+  // --- Extras (fork features, grouped under Settings > Extras) ---
+  // Auto page turn: 0 = off, 1 = on
   uint8_t autoPageTurnEnabled = 0;
-  // Độ trễ lật trang tự động (giây), mặc định 1, tối đa 10
-  uint8_t autoPageTurnDelay = 1;
+  // Auto page turn delay in seconds (AUTO_PAGE_TURN_DELAY_MIN..AUTO_PAGE_TURN_DELAY_MAX)
+  uint8_t autoPageTurnDelay = 5;
+  // Pause auto page turn when no button was pressed for a while
+  enum AUTO_PAGE_TURN_IDLE_STOP { IDLE_STOP_OFF = 0, IDLE_STOP_5_MIN, IDLE_STOP_10_MIN, IDLE_STOP_30_MIN,
+                                  AUTO_PAGE_TURN_IDLE_STOP_COUNT };
+  uint8_t autoPageTurnIdleStop = IDLE_STOP_10_MIN;
 
-  // Save power by turning off RTC during sleep
+  // Keep the RTC domain powered during deep sleep so the clock keeps running (~4mA, a few days of battery)
   uint8_t timeTrackingInSleep = 0;
+  // Light-sleep the CPU between button polls while idle (big battery saving; off = previous busy-wait behaviour)
+  uint8_t lightSleepEnabled = 1;
+  // Show the clock in screen headers
+  uint8_t showHeaderClock = 1;
+  // After a deep sleep without RTC, re-sync the clock over the last used WiFi network in the background
+  uint8_t autoTimeSync = 1;
+
+  // Fetch weather when WiFi connects; empty city = detect from IP
+  uint8_t weatherEnabled = 1;
+  char weatherCity[48] = "";
+
+  // Reading statistics
+  uint8_t readingStatsEnabled = 1;
+  // Daily reading goal in minutes (0 = off), shown on the Desk home theme
+  uint8_t dailyGoalMinutes = 30;
+  // Home screen shortcuts
+  uint8_t homeShowStats = 1;
+  uint8_t homeShowFeatures = 1;
 
   // Manual time base for offline persistence
   time_t manualTimeBase = 0;
@@ -217,6 +239,22 @@ class CrossPointSettings {
  public:
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
+
+  static constexpr uint8_t AUTO_PAGE_TURN_DELAY_MIN = 5;
+  static constexpr uint8_t AUTO_PAGE_TURN_DELAY_MAX = 30;
+  // 0 when auto page turn should never pause for inactivity
+  unsigned long getAutoPageTurnIdleStopMs() const {
+    switch (autoPageTurnIdleStop) {
+      case IDLE_STOP_5_MIN:
+        return 5UL * 60 * 1000;
+      case IDLE_STOP_10_MIN:
+        return 10UL * 60 * 1000;
+      case IDLE_STOP_30_MIN:
+        return 30UL * 60 * 1000;
+      default:
+        return 0;
+    }
+  }
   int getRefreshFrequency() const;
 };
 

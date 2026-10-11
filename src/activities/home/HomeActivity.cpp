@@ -18,22 +18,40 @@
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/DebugFileLog.h"
 #include "util/StringUtils.h"
 
-int HomeActivity::getMenuItemCount() const {
-  int count = 6;  // My Library, Recents, Stats, File transfer, Features, Settings
-  if (!recentBooks.empty()) {
-    count += recentBooks.size();
+std::vector<HomeActivity::MenuEntry> HomeActivity::buildMenuEntries() const {
+  std::vector<MenuEntry> entries;
+  entries.push_back({tr(STR_BROWSE_FILES), File, onMyLibraryOpen});
+  entries.push_back({tr(STR_MENU_RECENT_BOOKS), Recent, onRecentsOpen});
+  if (SETTINGS.homeShowStats) {
+    entries.push_back({tr(STR_READING_STATS), Book, onReadingStatsOpen});
   }
   if (hasOpdsUrl) {
-    count++;
+    entries.push_back({tr(STR_OPDS_BROWSER), Library, onOpdsBrowserOpen});
   }
-  return count;
+  entries.push_back({tr(STR_FILE_TRANSFER), Transfer, onFileTransferOpen});
+  if (SETTINGS.homeShowFeatures) {
+    entries.push_back({tr(STR_FEATURES), Library, onFeaturesOpen});
+  }
+  entries.push_back({tr(STR_SETTINGS_TITLE), Settings, onSettingsOpen});
+  return entries;
+}
+
+int HomeActivity::getMenuItemCount() const {
+  // Must match buildMenuEntries(); counted directly because loop() calls this on every iteration
+  int count = 4;  // Browse files, Recents, File transfer, Settings
+  if (SETTINGS.homeShowStats) count++;
+  if (hasOpdsUrl) count++;
+  if (SETTINGS.homeShowFeatures) count++;
+  return count + static_cast<int>(recentBooks.size());
 }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
   recentBooks.clear();
   const auto& books = RECENT_BOOKS.getBooks();
+  DLOG("HOME", "loadRecentBooks: store has %d books", static_cast<int>(books.size()));
   recentBooks.reserve(std::min(static_cast<int>(books.size()), maxBooks));
 
   for (const RecentBook& book : books) {
@@ -44,6 +62,7 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
 
     // Skip if file no longer exists
     if (!Storage.exists(book.path.c_str())) {
+      DLOG("HOME", "recent book hidden, file not found: '%s'", book.path.c_str());
       continue;
     }
 
@@ -188,33 +207,14 @@ void HomeActivity::loop() {
   });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    // Calculate dynamic indices based on which options are available
-    int idx = 0;
-    int menuSelectedIndex = selectorIndex - static_cast<int>(recentBooks.size());
-    const int myLibraryIdx = idx++;
-    const int recentsIdx = idx++;
-    const int statsIdx = idx++;
-    const int opdsLibraryIdx = hasOpdsUrl ? idx++ : -1;
-    const int fileTransferIdx = idx++;
-    const int featuresIdx = idx++;
-    const int settingsIdx = idx;
-
-    if (selectorIndex < (int)recentBooks.size()) {
+    if (selectorIndex < static_cast<int>(recentBooks.size())) {
       onSelectBook(recentBooks[selectorIndex].path);
-    } else if (menuSelectedIndex == myLibraryIdx) {
-      onMyLibraryOpen();
-    } else if (menuSelectedIndex == recentsIdx) {
-      onRecentsOpen();
-    } else if (menuSelectedIndex == statsIdx) {
-      onReadingStatsOpen();
-    } else if (menuSelectedIndex == opdsLibraryIdx) {
-      onOpdsBrowserOpen();
-    } else if (menuSelectedIndex == fileTransferIdx) {
-      onFileTransferOpen();
-    } else if (menuSelectedIndex == featuresIdx) {
-      onFeaturesOpen();
-    } else if (menuSelectedIndex == settingsIdx) {
-      onSettingsOpen();
+      return;
+    }
+    const auto entries = buildMenuEntries();
+    const int menuSelectedIndex = selectorIndex - static_cast<int>(recentBooks.size());
+    if (menuSelectedIndex < static_cast<int>(entries.size())) {
+      entries[menuSelectedIndex].open();
     }
   }
 }
@@ -233,25 +233,16 @@ void HomeActivity::render(Activity::RenderLock&&) {
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_READING_STATS),
-                                        tr(STR_FILE_TRANSFER), tr(STR_FEATURES), tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {File, Recent, Book, Transfer, Library, Settings};
-
-  if (hasOpdsUrl) {
-    // Insert OPDS Browser after Reading Stats
-    menuItems.insert(menuItems.begin() + 3, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 3, Library);
-  }
+  const auto menuEntries = buildMenuEntries();
 
   GUI.drawButtonMenu(
       renderer,
       Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, pageWidth,
            pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing * 2 +
                          metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()), selectorIndex - (int)recentBooks.size(),
-      [&menuItems](int index) { return std::string(menuItems[index]); },
-      [&menuIcons](int index) { return menuIcons[index]; });
+      static_cast<int>(menuEntries.size()), selectorIndex - (int)recentBooks.size(),
+      [&menuEntries](int index) { return std::string(menuEntries[index].label); },
+      [&menuEntries](int index) { return static_cast<UIIcon>(menuEntries[index].icon); });
 
   const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

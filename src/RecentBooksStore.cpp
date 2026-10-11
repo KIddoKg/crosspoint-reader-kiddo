@@ -9,6 +9,7 @@
 
 #include <algorithm>
 
+#include "util/DebugFileLog.h"
 #include "util/StringUtils.h"
 
 namespace {
@@ -16,7 +17,7 @@ constexpr uint8_t RECENT_BOOKS_FILE_VERSION = 3;
 constexpr char RECENT_BOOKS_FILE_BIN[] = "/.crosspoint/recent.bin";
 constexpr char RECENT_BOOKS_FILE_JSON[] = "/.crosspoint/recent.json";
 constexpr char RECENT_BOOKS_FILE_BAK[] = "/.crosspoint/recent.bin.bak";
-constexpr int MAX_RECENT_BOOKS = 10;
+constexpr int MAX_RECENT_BOOKS = 30;  // also feeds the Bookshelf Reading/Finished tabs
 }  // namespace
 
 RecentBooksStore RecentBooksStore::instance;
@@ -25,15 +26,17 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
                                const std::string& coverBmpPath) {
   // Remove existing entry if present, but keep its progress
   uint8_t oldProgress = 0;
+  uint8_t oldFurthest = 0;
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
     oldProgress = it->progress;
+    oldFurthest = it->furthest;
     recentBooks.erase(it);
   }
 
   // Add to front
-  recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath, oldProgress});
+  recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath, oldProgress, oldFurthest});
 
   // Trim to max size
   if (recentBooks.size() > MAX_RECENT_BOOKS) {
@@ -56,18 +59,27 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
   }
 }
 
-void RecentBooksStore::updateProgress(const std::string& path, uint8_t progress) {
+void RecentBooksStore::updateProgress(const std::string& path, uint8_t progress, uint8_t furthest) {
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
-  if (it != recentBooks.end()) {
+  if (it != recentBooks.end() && (it->progress != progress || it->furthest != furthest)) {
     it->progress = progress;
+    it->furthest = furthest;
     saveToFile();
   }
 }
 
+uint8_t RecentBooksStore::getFurthest(const std::string& path) const {
+  auto it =
+      std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
+  return it != recentBooks.end() ? it->furthest : 0;
+}
+
 bool RecentBooksStore::saveToFile() const {
   Storage.mkdir("/.crosspoint");
-  return JsonSettingsIO::saveRecentBooks(*this, RECENT_BOOKS_FILE_JSON);
+  const bool ok = JsonSettingsIO::saveRecentBooks(*this, RECENT_BOOKS_FILE_JSON);
+  DLOG("RECENT", "save: %d books, ok=%d", getCount(), ok ? 1 : 0);
+  return ok;
 }
 
 RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
@@ -105,8 +117,16 @@ bool RecentBooksStore::loadFromFile() {
   if (Storage.exists(RECENT_BOOKS_FILE_JSON)) {
     String json = Storage.readFile(RECENT_BOOKS_FILE_JSON);
     if (!json.isEmpty()) {
-      return JsonSettingsIO::loadRecentBooks(*this, json.c_str());
+      const bool ok = JsonSettingsIO::loadRecentBooks(*this, json.c_str());
+      DLOG("RECENT", "load json: %d bytes, ok=%d, %d books", json.length(), ok ? 1 : 0, getCount());
+      if (!ok) {
+        DLOG("RECENT", "bad json head: %.120s", json.c_str());
+      }
+      return ok;
     }
+    DLOG("RECENT", "load json: file exists but is EMPTY");
+  } else {
+    DLOG("RECENT", "load json: file missing");
   }
 
   // Fall back to binary migration

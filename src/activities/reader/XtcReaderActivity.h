@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "FurthestProgress.h"
+#include "util/AutoPageTurner.h"
 #include <Xtc.h>
 
 #include "activities/ActivityWithSubactivity.h"
@@ -19,10 +21,8 @@ class XtcReaderActivity final : public ActivityWithSubactivity {
 
   const std::function<void()> onGoBack;
   const std::function<void()> onGoHome;
-
-  // --- Auto Page Turn ---
-  unsigned long autoPageTurnTimer = 0;  // ms đã trôi qua
-  unsigned long autoPageTurnLastTick = 0;  // tick cuối cùng
+  AutoPageTurner autoPageTurner;
+  FurthestProgress furthestProgress;
   unsigned long readerEnterTime = 0; // ms lúc vào reader
 
   void renderPage();

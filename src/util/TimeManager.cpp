@@ -1,5 +1,6 @@
 #include "TimeManager.h"
 #include <Logging.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <sys/time.h>
@@ -13,6 +14,7 @@
 // → esp_rtc_get_time_us() đếm đúng qua sleep
 extern "C" uint64_t esp_rtc_get_time_us(void);
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 
 // Biến trong RTC Memory của ESP32-C3 (LP SRAM)
 // → survive deep sleep vì GPIO13 hold giữ LDO sống
@@ -42,6 +44,23 @@ time_t TimeManager::getCurrentTime() const {
   return time(nullptr);
 }
 
+bool TimeManager::hasValidClock() const {
+  constexpr time_t MIN_VALID_TIME = 1704067200;  // 2024-01-01
+  return time(nullptr) > MIN_VALID_TIME;
+}
+
+bool TimeManager::formatClock(char* buffer, const size_t size) const {
+  if (!hasValidClock()) {
+    return false;
+  }
+  const time_t now = time(nullptr);
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo);
+  // "~" marks an estimated time (restored from SD after a deep sleep without RTC) until the next sync
+  strftime(buffer, size, approximate ? "~%H:%M" : "%H:%M", &timeinfo);
+  return true;
+}
+
 void TimeManager::setManualTime(int hour, int minute, int second) {
   LOG_INF("TIME", "Setting manual time: %02d:%02d:%02d", hour, minute, second);
 
@@ -59,6 +78,7 @@ void TimeManager::setManualTime(int hour, int minute, int second) {
   SETTINGS.saveToFile();
 
   isTimeSet = true;
+  approximate = false;
 }
 
 void TimeManager::setManualDateTime(int year, int month, int day, int hour, int minute, int second) {
@@ -82,6 +102,7 @@ void TimeManager::setManualDateTime(int year, int month, int day, int hour, int 
   SETTINGS.saveToFile();
 
   isTimeSet = true;
+  approximate = false;
 }
 
 void TimeManager::syncTimeFromNTP() {
@@ -96,42 +117,23 @@ void TimeManager::syncTimeFromNTP() {
   xTaskCreate(
       [](void* param) {
         TimeManager* pThis = static_cast<TimeManager*>(param);
-        int gmtOffset = 0;
+        // Keep the saved offset unless the lookup succeeds (a failed lookup used to reset it to UTC)
+        int gmtOffset = SETTINGS.timezoneOffsetSeconds;
         HTTPClient http;
         http.setTimeout(5000);
         http.setConnectTimeout(5000);
-        
-        if (http.begin("http://ip-api.com/json?fields=timezone")) {
-          int httpCode = http.GET();
-          if (httpCode == HTTP_CODE_OK) {
-            String payload = http.getString();
+
+        // ip-api returns the UTC offset (seconds, DST included) of the request IP's timezone
+        if (http.begin("http://ip-api.com/json?fields=status,offset")) {
+          if (http.GET() == HTTP_CODE_OK) {
             JsonDocument doc;
-            DeserializationError error = deserializeJson(doc, payload);
-            if (!error && doc["timezone"].is<const char*>()) {
-              const char* timezone = doc["timezone"].as<const char*>();
-              std::string tzStr(timezone);
-              if (tzStr.find("Ho_Chi_Minh") != std::string::npos ||
-                  tzStr.find("Bangkok") != std::string::npos ||
-                  tzStr.find("Hanoi") != std::string::npos) {
-                gmtOffset = 7 * 3600;
-              } else if (tzStr.find("Shanghai") != std::string::npos ||
-                         tzStr.find("Hong_Kong") != std::string::npos) {
-                gmtOffset = 8 * 3600;
-              } else if (tzStr.find("Tokyo") != std::string::npos) {
-                gmtOffset = 9 * 3600;
-              } else if (tzStr.find("Sydney") != std::string::npos) {
-                gmtOffset = 10 * 3600;
-              } else if (tzStr.find("New_York") != std::string::npos ||
-                         tzStr.find("America") != std::string::npos) {
-                gmtOffset = -5 * 3600;
-              } else if (tzStr.find("Los_Angeles") != std::string::npos) {
-                gmtOffset = -8 * 3600;
-              }
+            if (!deserializeJson(doc, http.getString()) && doc["status"] == "success" && doc["offset"].is<int>()) {
+              gmtOffset = doc["offset"].as<int>();
             }
           }
           http.end();
         }
-        
+
         // Khởi động SNTP và cấu hình timezone
         configTime(gmtOffset, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
         SETTINGS.timezoneOffsetSeconds = gmtOffset;
@@ -145,8 +147,10 @@ void TimeManager::syncTimeFromNTP() {
           attempts++;
         }
         time_t now = time(nullptr);
-        
-        if (now > 24 * 3600) {
+
+        // Judge success by the SNTP status: time() is already plausible when it was restored approximately
+        if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED && now > 24 * 3600) {
+          pThis->approximate = false;
           pThis->lastSyncTime = now;
           pThis->isTimeSet = true;
           SETTINGS.manualTimeBase = now;
@@ -229,12 +233,15 @@ void TimeManager::restoreTimeFromRTC() {
             (long)g_rtcSavedTime, (int)elapsedSec, (long)restored);
     return;
   }
-  // Lớp 2: SD card (survive mất nguồn hoàn toàn)
-  if (SETTINGS.manualTimeBase > 24 * 3600LL) {
-    struct timeval tv = {.tv_sec = SETTINGS.manualTimeBase, .tv_usec = 0};
+  // Lớp 2: SD card (survive mất nguồn hoàn toàn). Use the newest of the last sync/manual time and the time the
+  // device went to sleep; the clock will lag by the sleep duration until the next WiFi sync.
+  const time_t sdTime = std::max<time_t>(SETTINGS.manualTimeBase, static_cast<time_t>(APP_STATE.lastSleepTime));
+  if (sdTime > 24 * 3600LL) {
+    struct timeval tv = {.tv_sec = sdTime, .tv_usec = 0};
     settimeofday(&tv, nullptr);
     isTimeSet = true;
-    LOG_INF("TIME", "Restored from manualTimeBase: %ld", (long)SETTINGS.manualTimeBase);
+    approximate = true;  // lags by however long the device slept
+    LOG_INF("TIME", "Restored from SD: %ld", (long)sdTime);
     return;
   }
   LOG_DBG("TIME", "No valid time (never NTP synced)");

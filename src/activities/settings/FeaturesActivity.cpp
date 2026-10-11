@@ -43,7 +43,11 @@ void FeaturesActivity::updateDateTime() {
 }
 
 void FeaturesActivity::updateWeather() {
-  if (wifiConnected) {
+  if (!SETTINGS.weatherEnabled) {
+    weatherArea = tr(STR_STATE_OFF);
+    weatherCondition = "";
+    weatherTemperature = "";
+  } else if (wifiConnected) {
     std::string weather = WeatherManager::getInstance().getWeatherData();
     LOG_INF("FEAT", "Raw weather data: '%s' (len=%zu)", weather.c_str(), weather.length());
 
@@ -367,7 +371,7 @@ void FeaturesActivity::render(Activity::RenderLock&& lock) {
   const auto pageHeight = renderer.getScreenHeight();
 
   // Draw header
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FEATURES));
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_DATE_TIME_WEATHER));
 
   // Content area - display date, time, and weather info
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;

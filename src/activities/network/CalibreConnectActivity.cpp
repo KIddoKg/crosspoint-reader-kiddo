@@ -1,4 +1,5 @@
 #include "CalibreConnectActivity.h"
+#include "util/BackgroundTimeSync.h"
 
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
@@ -17,6 +18,7 @@ constexpr const char* HOSTNAME = "crosspoint";
 
 void CalibreConnectActivity::onEnter() {
   ActivityWithSubactivity::onEnter();
+  BackgroundTimeSync::stop();  // take WiFi over from a background clock sync, if one is running
 
   requestUpdate();
   state = CalibreConnectState::WIFI_SELECTION;

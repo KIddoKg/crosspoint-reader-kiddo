@@ -79,6 +79,9 @@ class InputManager {
   // Power button methods
   bool isPowerButtonPressed() const;
 
+  // True while a raw button-state change is still inside the debounce window (needs another sample to commit)
+  bool isDebouncePending() const { return lastState != currentState; }
+
   // Button names
   static const char* getButtonName(uint8_t buttonIndex);
 

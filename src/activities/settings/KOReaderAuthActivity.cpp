@@ -1,4 +1,5 @@
 #include "KOReaderAuthActivity.h"
+#include "util/BackgroundTimeSync.h"
 
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -52,6 +53,7 @@ void KOReaderAuthActivity::performAuthentication() {
 
 void KOReaderAuthActivity::onEnter() {
   ActivityWithSubactivity::onEnter();
+  BackgroundTimeSync::stop();  // take WiFi over from a background clock sync, if one is running
 
   // Turn on WiFi
   WiFi.mode(WIFI_STA);

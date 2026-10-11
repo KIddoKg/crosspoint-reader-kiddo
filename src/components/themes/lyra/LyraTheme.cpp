@@ -181,10 +181,10 @@ void LyraTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
 
 void LyraTheme::drawDateTimeRight(const GfxRenderer& renderer, Rect rect) const {
   // Draw date/time on the left side next to title - get time from TimeManager
-  time_t now = TimeManager::getInstance().getCurrentTime();
-  struct tm* timeinfo = localtime(&now);
   char dateTimeBuffer[32];
-  strftime(dateTimeBuffer, sizeof(dateTimeBuffer), "%H:%M", timeinfo);
+  if (!SETTINGS.showHeaderClock || !TimeManager::getInstance().formatClock(dateTimeBuffer, sizeof(dateTimeBuffer))) {
+    return;
+  }
   
   const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, dateTimeBuffer);
   const int textHeight = renderer.getTextHeight(UI_12_FONT_ID);
@@ -203,18 +203,18 @@ void LyraTheme::drawDateTimeRight(const GfxRenderer& renderer, Rect rect) const 
 void LyraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle) const {
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
 
-  // Draw date/time at top-left corner
-  time_t now = TimeManager::getInstance().getCurrentTime();
-  struct tm* timeinfo = localtime(&now);
+  // Draw date/time at top-left corner (hidden when disabled or when the clock has no valid time yet)
   char dateTimeBuffer[32];
-  strftime(dateTimeBuffer, sizeof(dateTimeBuffer), "%H:%M", timeinfo);
-  
-  const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, dateTimeBuffer);
-  const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
-  
-  // Clear area and draw at top-left, aligned with battery
-  renderer.fillRect(rect.x + LyraMetrics::values.contentSidePadding - 5, rect.y + 5, textWidth + 10, textHeight, false);
-  renderer.drawText(SMALL_FONT_ID, rect.x + LyraMetrics::values.contentSidePadding, rect.y + 7, dateTimeBuffer, true, EpdFontFamily::REGULAR);
+  if (SETTINGS.showHeaderClock && TimeManager::getInstance().formatClock(dateTimeBuffer, sizeof(dateTimeBuffer))) {
+    const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, dateTimeBuffer);
+    const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+
+    // Clear area and draw at top-left, aligned with battery
+    renderer.fillRect(rect.x + LyraMetrics::values.contentSidePadding - 5, rect.y + 5, textWidth + 10, textHeight,
+                      false);
+    renderer.drawText(SMALL_FONT_ID, rect.x + LyraMetrics::values.contentSidePadding, rect.y + 7, dateTimeBuffer,
+                      true, EpdFontFamily::REGULAR);
+  }
 
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
@@ -271,8 +271,18 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
     renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
   }
 
+  std::vector<int> widths;
+  widths.reserve(tabs.size());
   for (const auto& tab : tabs) {
-    const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR);
+    widths.push_back(renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR) +
+                     2 * hPaddingInSelection);
+  }
+  const size_t firstTab = firstVisibleTab(widths, tabs, LyraMetrics::values.tabSpacing,
+                                          rect.width - 2 * LyraMetrics::values.contentSidePadding);
+
+  for (size_t i = firstTab; i < tabs.size(); i++) {
+    const auto& tab = tabs[i];
+    const int textWidth = widths[i] - 2 * hPaddingInSelection;
 
     if (tab.selected) {
       if (selected) {

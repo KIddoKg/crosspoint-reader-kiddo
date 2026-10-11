@@ -54,4 +54,7 @@ class GridHomeTheme : public LyraTheme {
                            int selectorIndex) const override;
   int getRecentBooksItemsPerPage(const GfxRenderer& renderer) const override;
   int getRecentBooksColumns() const override { return 3; }
+
+  // 32px menu icon for a UIIcon, or nullptr (shared with the Desk theme)
+  static const uint8_t* menuIcon(UIIcon icon);
 };

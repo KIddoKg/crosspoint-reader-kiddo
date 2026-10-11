@@ -22,6 +22,8 @@ enum class SettingAction {
   CheckForUpdates,
   Language,
   Features,
+  ReadingStats,
+  ResetReadingStats,
 };
 
 struct SettingInfo {
@@ -74,11 +76,12 @@ struct SettingInfo {
     return s;
   }
 
-  static SettingInfo Action(StrId nameId, SettingAction action) {
+  static SettingInfo Action(StrId nameId, SettingAction action, StrId category = StrId::STR_NONE_OPT) {
     SettingInfo s;
     s.nameId = nameId;
     s.type = SettingType::ACTION;
     s.action = action;
+    s.category = category;
     return s;
   }
 
@@ -146,15 +149,20 @@ class SettingsActivity final : public ActivityWithSubactivity {
   std::vector<SettingInfo> readerSettings;
   std::vector<SettingInfo> controlsSettings;
   std::vector<SettingInfo> systemSettings;
+  std::vector<SettingInfo> extrasSettings;
   const std::vector<SettingInfo>* currentSettings = nullptr;
 
   const std::function<void()> onGoHome;
 
-  static constexpr int categoryCount = 4;
+  // Destructive actions (e.g. reset statistics) need a second Confirm press on the same row
+  int pendingConfirmIndex = -1;
+
+  static constexpr int categoryCount = 5;
   static const StrId categoryNames[categoryCount];
 
   void enterCategory(int categoryIndex);
   void toggleCurrentSetting();
+  void editStringSetting(const SettingInfo& setting);
 
  public:
   explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,

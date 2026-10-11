@@ -15,6 +15,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "ProgressFile.h"
 #include "RecentBooksStore.h"
 #include "ReadingStatsStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
@@ -37,11 +38,13 @@ void XtcReaderActivity::onEnter() {
 
   // Load saved progress
   loadProgress();
+  furthestProgress.load(xtc->getCachePath());
 
   // Save current XTC as last opened book and add to recent books
   APP_STATE.openEpubPath = xtc->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
+  furthestProgress.seedIfMissing(RECENT_BOOKS.getFurthest(xtc->getPath()));
 
   // Initialize reading time tracking
   readerEnterTime = millis();
@@ -58,13 +61,16 @@ void XtcReaderActivity::onExit() {
     uint8_t progressPercent = 0;
     if (xtc->getPageCount() > 0) {
       progressPercent = xtc->calculateProgress(currentPage);
-      RECENT_BOOKS.updateProgress(xtc->getPath(), progressPercent);
+    }
+    const uint8_t furthestPercent = furthestProgress.get(progressPercent);
+    if (xtc->getPageCount() > 0) {
+      RECENT_BOOKS.updateProgress(xtc->getPath(), progressPercent, furthestPercent);
     }
 
     uint32_t elapsedSeconds = (millis() - readerEnterTime) / 1000;
     uint32_t elapsedMinutes = (elapsedSeconds + 30) / 60; // Round to nearest minute
     if (elapsedMinutes > 0) {
-      READING_STATS.addReadingTime(xtc->getPath(), xtc->getTitle(), elapsedMinutes, progressPercent);
+      READING_STATS.addReadingTime(xtc->getPath(), xtc->getTitle(), elapsedMinutes, furthestPercent);
     }
   }
 
@@ -74,37 +80,20 @@ void XtcReaderActivity::onExit() {
 }
 
 void XtcReaderActivity::loop() {
-  LOG_DBG("XTC", "AutoPageTurn: enabled=%d, timer=%lu, lastTick=%lu", SETTINGS.autoPageTurnEnabled, autoPageTurnTimer, autoPageTurnLastTick);
-
-  // --- Auto Page Turn ---
-  unsigned long now = millis();
-  if (SETTINGS.autoPageTurnEnabled) {
-    if (autoPageTurnLastTick == 0) autoPageTurnLastTick = now;
-    autoPageTurnTimer += (now - autoPageTurnLastTick);
-    autoPageTurnLastTick = now;
-    unsigned long delayMs = SETTINGS.autoPageTurnDelay * 1000;
-    if (autoPageTurnTimer >= delayMs) {
-      // Tự động sang trang nếu chưa ở cuối sách
-      if (xtc && currentPage < xtc->getPageCount() - 1) {
-        const bool skipPages = SETTINGS.longPressChapterSkip && false; // Không có nhấn giữ nên luôn false
-        const int skipAmount = skipPages ? 10 : 1;
-        currentPage += skipAmount;
-        if (currentPage >= xtc->getPageCount()) {
-          currentPage = xtc->getPageCount() - 1;
-        }
-        requestUpdate();
-      }
-      autoPageTurnTimer = 0;
-    }
-  } else {
-    autoPageTurnTimer = 0;
-    autoPageTurnLastTick = now;
-  }
-
   // Pass input responsibility to sub activity if exists
   if (subActivity) {
     subActivity->loop();
     return;
+  }
+
+  // --- Auto Page Turn (only while the page itself is shown, never behind a menu) ---
+  if (mappedInput.wasAnyPressed()) {
+    autoPageTurner.onUserInput();
+  }
+  if (autoPageTurner.shouldTurnPage() && xtc && currentPage < xtc->getPageCount() - 1) {
+    furthestProgress.markSequentialAdvance();
+    currentPage++;
+    requestUpdate();
   }
 
   // Enter chapter selection activity
@@ -173,16 +162,15 @@ void XtcReaderActivity::loop() {
     }
     requestUpdate();
   } else if (nextTriggered) {
+    if (skipAmount == 1) {
+      furthestProgress.markSequentialAdvance();  // long-press 10 page skips do not count as read
+      READING_STATS.notePageTurn();
+    }
     currentPage += skipAmount;
     if (currentPage >= xtc->getPageCount()) {
       currentPage = xtc->getPageCount();  // Allow showing "End of book"
     }
     requestUpdate();
-  }
-
-  if (prevTriggered || nextTriggered) {
-    autoPageTurnTimer = 0;
-    autoPageTurnLastTick = millis();
   }
 }
 
@@ -197,11 +185,13 @@ void XtcReaderActivity::render(Activity::RenderLock&&) {
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_END_OF_BOOK), true, EpdFontFamily::BOLD);
     renderer.displayBuffer();
+    furthestProgress.onPageShown(100);
     return;
   }
 
   renderPage();
   saveProgress();
+  furthestProgress.onPageShown(static_cast<int>((currentPage + 1) * 100ULL / xtc->getPageCount()));
 }
 
 void XtcReaderActivity::renderPage() {
@@ -385,16 +375,12 @@ void XtcReaderActivity::renderPage() {
 }
 
 void XtcReaderActivity::saveProgress() const {
-  FsFile f;
-  if (Storage.openFileForWrite("XTR", xtc->getCachePath() + "/progress.bin", f)) {
-    uint8_t data[4];
-    data[0] = currentPage & 0xFF;
-    data[1] = (currentPage >> 8) & 0xFF;
-    data[2] = (currentPage >> 16) & 0xFF;
-    data[3] = (currentPage >> 24) & 0xFF;
-    f.write(data, 4);
-    f.close();
-  }
+  uint8_t data[4];
+  data[0] = currentPage & 0xFF;
+  data[1] = (currentPage >> 8) & 0xFF;
+  data[2] = (currentPage >> 16) & 0xFF;
+  data[3] = (currentPage >> 24) & 0xFF;
+  ProgressFile::writeAtomic(xtc->getCachePath(), data, sizeof(data));
 }
 
 void XtcReaderActivity::loadProgress() {

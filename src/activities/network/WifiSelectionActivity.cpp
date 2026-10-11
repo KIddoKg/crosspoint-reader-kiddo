@@ -1,4 +1,5 @@
 // #include "WifiSelectionActivity.h"
+#include "util/BackgroundTimeSync.h"
 
 // #include <GfxRenderer.h>
 // #include <I18n.h>
@@ -485,6 +486,7 @@
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
+  BackgroundTimeSync::stop();  // take WiFi over from a background clock sync, if one is running
 
   // Load saved WiFi credentials - SD card operations need lock as we use SPI
   // for both

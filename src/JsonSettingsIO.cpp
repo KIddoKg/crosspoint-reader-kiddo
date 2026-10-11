@@ -22,6 +22,9 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["lastSleepImage"] = s.lastSleepImage;
   doc["readerActivityLoadCount"] = s.readerActivityLoadCount;
   doc["lastSleepFromReader"] = s.lastSleepFromReader;
+  doc["lastSleepTime"] = s.lastSleepTime;
+  doc["lastAutoSyncTime"] = s.lastAutoSyncTime;
+  doc["lastWeather"] = s.lastWeather;
 
   String json;
   serializeJson(doc, json);
@@ -40,6 +43,9 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.lastSleepImage = doc["lastSleepImage"] | (uint8_t)0;
   s.readerActivityLoadCount = doc["readerActivityLoadCount"] | (uint8_t)0;
   s.lastSleepFromReader = doc["lastSleepFromReader"] | false;
+  s.lastSleepTime = doc["lastSleepTime"] | (int64_t)0;
+  s.lastAutoSyncTime = doc["lastAutoSyncTime"] | (int64_t)0;
+  s.lastWeather = doc["lastWeather"] | std::string("");
   return true;
 }
 
@@ -48,6 +54,7 @@ bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char
     doc["totalMinutes"] = store.totalMinutes;
     doc["lastReadDayIndex"] = store.lastReadDayIndex;
     doc["currentStreak"] = store.currentStreak;
+    doc["avgSecPerPage"] = store.avgSecondsPerPage;
 
     JsonArray daily = doc["dailyReadings"].to<JsonArray>();
     for (const auto& ds : store.dailyReadings) {
@@ -83,6 +90,7 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* path
     store.totalMinutes = doc["totalMinutes"] | 0u;
     store.lastReadDayIndex = doc["lastReadDayIndex"] | 0u;
     store.currentStreak = doc["currentStreak"] | 0u;
+    store.avgSecondsPerPage = doc["avgSecPerPage"] | 0u;
 
     store.dailyReadings.clear();
     JsonArray daily = doc["dailyReadings"];
@@ -135,10 +143,20 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["embeddedStyle"] = s.embeddedStyle;
   doc["timezoneOffsetSeconds"] = s.timezoneOffsetSeconds;
 
-  // Auto Page Turn settings
+  // Extras
   doc["autoPageTurnEnabled"] = s.autoPageTurnEnabled;
   doc["autoPageTurnDelay"] = s.autoPageTurnDelay;
+  doc["autoPageTurnIdleStop"] = s.autoPageTurnIdleStop;
   doc["timeTrackingInSleep"] = s.timeTrackingInSleep;
+  doc["showHeaderClock"] = s.showHeaderClock;
+  doc["lightSleepEnabled"] = s.lightSleepEnabled;
+  doc["autoTimeSync"] = s.autoTimeSync;
+  doc["weatherEnabled"] = s.weatherEnabled;
+  doc["weatherCity"] = s.weatherCity;
+  doc["readingStatsEnabled"] = s.readingStatsEnabled;
+  doc["dailyGoalMinutes"] = s.dailyGoalMinutes;
+  doc["homeShowStats"] = s.homeShowStats;
+  doc["homeShowFeatures"] = s.homeShowFeatures;
 
   // Time persistence: lưu timestamp NTP sync cuối cùng để khôi phục sau power-off
   doc["manualTimeBase"] = (int64_t)s.manualTimeBase;
@@ -195,14 +213,32 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.longPressChapterSkip = doc["longPressChapterSkip"] | (uint8_t)1;
   s.hyphenationEnabled = doc["hyphenationEnabled"] | (uint8_t)0;
   s.uiTheme = doc["uiTheme"] | (uint8_t)S::LYRA;
+  if (s.uiTheme > S::MINIMAL) s.uiTheme = S::LYRA;  // unknown theme would leave UITheme without a theme
   s.fadingFix = doc["fadingFix"] | (uint8_t)0;
   s.embeddedStyle = doc["embeddedStyle"] | (uint8_t)1;
   s.timezoneOffsetSeconds = doc["timezoneOffsetSeconds"] | (int32_t)0;
 
-  // Auto Page Turn settings
-  s.autoPageTurnEnabled = clamp(doc["autoPageTurnEnabled"] | (uint8_t)0, 2, 0); // 0=off, 1=on
-  s.autoPageTurnDelay = clamp(doc["autoPageTurnDelay"] | (uint8_t)5, 21, 5); // min=5, max=20, default=5
+  // Extras
+  s.autoPageTurnEnabled = clamp(doc["autoPageTurnEnabled"] | (uint8_t)0, 2, 0);
+  s.autoPageTurnDelay = doc["autoPageTurnDelay"] | (uint8_t)5;
+  if (s.autoPageTurnDelay < S::AUTO_PAGE_TURN_DELAY_MIN || s.autoPageTurnDelay > S::AUTO_PAGE_TURN_DELAY_MAX) {
+    s.autoPageTurnDelay = 5;
+  }
+  s.autoPageTurnIdleStop = clamp(doc["autoPageTurnIdleStop"] | (uint8_t)S::IDLE_STOP_10_MIN,
+                                 S::AUTO_PAGE_TURN_IDLE_STOP_COUNT, S::IDLE_STOP_10_MIN);
   s.timeTrackingInSleep = doc["timeTrackingInSleep"] | (uint8_t)0;
+  s.showHeaderClock = doc["showHeaderClock"] | (uint8_t)1;
+  s.lightSleepEnabled = doc["lightSleepEnabled"] | (uint8_t)1;
+  s.autoTimeSync = doc["autoTimeSync"] | (uint8_t)1;
+  s.weatherEnabled = doc["weatherEnabled"] | (uint8_t)1;
+  const char* city = doc["weatherCity"] | "";
+  strncpy(s.weatherCity, city, sizeof(s.weatherCity) - 1);
+  s.weatherCity[sizeof(s.weatherCity) - 1] = '\0';
+  s.readingStatsEnabled = doc["readingStatsEnabled"] | (uint8_t)1;
+  s.dailyGoalMinutes = doc["dailyGoalMinutes"] | (uint8_t)30;
+  if (s.dailyGoalMinutes > 120) s.dailyGoalMinutes = 30;
+  s.homeShowStats = doc["homeShowStats"] | (uint8_t)1;
+  s.homeShowFeatures = doc["homeShowFeatures"] | (uint8_t)1;
 
   // Time persistence: khôi phục timestamp NTP sync cuối cùng
   s.manualTimeBase = (time_t)(doc["manualTimeBase"] | (int64_t)0);
@@ -325,6 +361,7 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
     obj["author"] = book.author;
     obj["coverBmpPath"] = book.coverBmpPath;
     obj["progress"] = book.progress;
+    obj["furthest"] = book.furthest;
   }
 
   String json;
@@ -343,13 +380,14 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
   store.recentBooks.clear();
   JsonArray arr = doc["books"].as<JsonArray>();
   for (JsonObject obj : arr) {
-    if (store.getCount() >= 10) break;
+    if (store.getCount() >= 30) break;  // keep in sync with MAX_RECENT_BOOKS
     RecentBook book;
     book.path = obj["path"] | std::string("");
     book.title = obj["title"] | std::string("");
     book.author = obj["author"] | std::string("");
     book.coverBmpPath = obj["coverBmpPath"] | std::string("");
     book.progress = obj["progress"] | (uint8_t)0;
+    book.furthest = obj["furthest"] | book.progress;
     store.recentBooks.push_back(book);
   }
 

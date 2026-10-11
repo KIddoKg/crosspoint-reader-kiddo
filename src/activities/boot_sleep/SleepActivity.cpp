@@ -1,5 +1,6 @@
 #include "SleepActivity.h"
 
+#include <Bitmap.h>
 #include <Epub.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -7,8 +8,14 @@
 #include <Txt.h>
 #include <Xtc.h>
 
+#include <algorithm>
+#include <cstdio>
+
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "RecentBooksStore.h"
+#include "activities/reader/FurthestProgress.h"
+#include "components/DashboardWidgets.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/Logo120.h"
@@ -26,6 +33,8 @@ void SleepActivity::onEnter() {
     case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER):
     case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM):
       return renderCoverSleepScreen();
+    case (CrossPointSettings::SLEEP_SCREEN_MODE::DASHBOARD):
+      return renderDashboardSleepScreen();
     default:
       return renderDefaultSleepScreen();
   }
@@ -278,6 +287,69 @@ void SleepActivity::renderCoverSleepScreen() const {
   }
 
   return (this->*renderNoCoverSleepScreen)();
+}
+
+void SleepActivity::renderDashboardSleepScreen() const {
+  constexpr int pad = 24;
+  constexpr int radius = 10;
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
+  const int coverWidth = coverHeight * 2 / 3;
+  renderer.clearScreen();
+
+  int y = pad + 10;
+  const auto& books = RECENT_BOOKS.getBooks();
+  if (!books.empty()) {
+    const RecentBook& book = books.front();
+    const int coverX = (pageWidth - coverWidth) / 2;
+    bool hasCover = false;
+    if (!book.coverBmpPath.empty()) {
+      FsFile file;
+      if (Storage.openFileForRead("SLP", UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight), file)) {
+        Bitmap bitmap(file);
+        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+          renderer.drawBitmap(bitmap, coverX, y, coverWidth, coverHeight);
+          hasCover = true;
+        }
+      }
+    }
+    if (!hasCover) {
+      renderer.fillRect(coverX, y + coverHeight / 3, coverWidth, 2 * coverHeight / 3, true);
+    }
+    renderer.drawRect(coverX, y, coverWidth, coverHeight, true);
+    y += coverHeight + 14;
+
+    const auto title = renderer.truncatedText(UI_12_FONT_ID, book.title.c_str(), pageWidth - 2 * pad,
+                                              EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, y, title.c_str(), true, EpdFontFamily::BOLD);
+    y += renderer.getLineHeight(UI_12_FONT_ID) + 4;
+
+    const uint8_t furthest = std::max(book.furthest, book.progress);
+    char progress[32];
+    if (furthest >= FurthestProgress::FINISHED_PERCENT) {
+      snprintf(progress, sizeof(progress), "%s", tr(STR_BOOK_FINISHED));
+    } else {
+      snprintf(progress, sizeof(progress), "%u%%", static_cast<unsigned>(furthest));
+    }
+    renderer.drawCenteredText(UI_10_FONT_ID, y, progress, true);
+    y += renderer.getLineHeight(UI_10_FONT_ID) + 16;
+  }
+
+  const Rect dateRect{pad, y, pageWidth - 2 * pad, 130};
+  renderer.drawRoundedRect(dateRect.x, dateRect.y, dateRect.width, dateRect.height, 1, radius, true);
+  DashboardWidgets::drawClock(renderer, dateRect, true);
+  y += dateRect.height + 12;
+
+  if (SETTINGS.readingStatsEnabled) {
+    const Rect goalRect{pad, y, pageWidth - 2 * pad, 56};
+    renderer.drawRoundedRect(goalRect.x, goalRect.y, goalRect.width, goalRect.height, 1, radius, true);
+    DashboardWidgets::drawGoal(renderer, goalRect);
+  }
+
+  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight - pad - renderer.getLineHeight(UI_10_FONT_ID), tr(STR_SLEEPING),
+                            true);
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
 void SleepActivity::renderBlankSleepScreen() const {

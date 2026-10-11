@@ -12,6 +12,10 @@
 
 HalPowerManager powerManager;  // Singleton instance
 
+// GPIO13 (the flash SPIWP pad, unused in DIO flash mode) drives the battery-latch MOSFET: high keeps the battery
+// connected, low powers the device off.
+static constexpr gpio_num_t GPIO_BATTERY_LATCH = GPIO_NUM_13;
+
 void HalPowerManager::begin() {
   pinMode(BAT_GPIO0, INPUT);
   normalFreq = getCpuFrequencyMhz();
@@ -55,20 +59,21 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+  // lightSleep() pad-holds the battery latch HIGH while running, so the latch level must be set explicitly here.
+  gpio_hold_dis(GPIO_BATTERY_LATCH);
+  gpio_set_direction(GPIO_BATTERY_LATCH, GPIO_MODE_OUTPUT);
   if (SETTINGS.timeTrackingInSleep) {
-    // GPIO13 = LDO EN pin. Nếu không hold, LDO tắt khi deep sleep
-    // → ESP32 mất điện hoàn toàn → RTC domain chết → không thể tính elapsed time
-    // Trade-off: tốn ~4mA trong sleep, pin 650mAh ~ 5 ngày
-    gpio_hold_en(GPIO_NUM_13);
-    gpio_deep_sleep_hold_en();
+    // Keep the battery connected through deep sleep so the RTC keeps counting (costs battery: the board stays powered)
+    gpio_set_level(GPIO_BATTERY_LATCH, 1);
     LOG_INF("PWR", "RTC domain will be held ON during deep sleep");
   } else {
-    // If unchecked, release GPIO hold to enter true deep sleep (~20uA)
-    // RTC domain will be turned off and time will be lost until next wifi sync.
-    gpio_hold_dis(GPIO_NUM_13);
-    gpio_deep_sleep_hold_dis();
+    // Drive the latch low: on battery this powers the device off (~20uA); on USB power the GPIO wake still works.
+    // RTC time is lost until the next sync.
+    gpio_set_level(GPIO_BATTERY_LATCH, 0);
     LOG_INF("PWR", "RTC domain will be powered off during deep sleep");
   }
+  gpio_hold_en(GPIO_BATTERY_LATCH);
+  gpio_deep_sleep_hold_en();
 
   // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {
@@ -79,6 +84,59 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
   // Enter Deep Sleep
   esp_deep_sleep_start();
+}
+
+bool HalPowerManager::lightSleep(const HalGPIO& gpio) const {
+  // A performance Lock means a render is mid-flight; light sleep freezes the whole chip and would stall it.
+  // Read without the mutex like setPowerSaving(): a stale value costs at most one 50 ms slice.
+  if (currentLockMode != None) {
+    return false;
+  }
+  // Light sleep drops a WiFi association and kills an enumerated USB-CDC link.
+  if (WiFi.getMode() != WIFI_MODE_NULL || gpio.isUsbConnected()) {
+    return false;
+  }
+
+  // By default the C3 switches GPIO pads to their "sleep" configuration during light sleep, which lets the e-ink and
+  // SD lines (RST, CS, DC, SPI) float: the panel controller then resets mid-refresh and stays BUSY forever (frozen
+  // screen). Keep these pads in their active configuration through light sleep.
+  static bool padsPinned = false;
+  if (!padsPinned) {
+    for (const int pin : {EPD_SCLK, EPD_MOSI, EPD_CS, EPD_DC, EPD_RST, EPD_BUSY, 7 /* SD MISO */, 12 /* SD CS */}) {
+      gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
+    }
+    padsPinned = true;
+  }
+
+  // Timer wake keeps the button poll cadence of the delay() this replaces: the front/side buttons are ADC
+  // resistor-ladder inputs that cannot wake the chip, so they must be polled. The power button is a real GPIO and
+  // is also armed (level wake at its pressed level) so taps shorter than a slice are not dropped; update()'s debounce
+  // still decides whether it was a real press.
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(LIGHT_SLEEP_SLICE_MS) * 1000ULL);
+  const auto powerPin = static_cast<gpio_num_t>(InputManager::POWER_BUTTON_PIN);
+  gpio_wakeup_enable(powerPin, GPIO_INTR_LOW_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
+
+  // The IDF flash-leakage workaround pulls the unused SPIWP pad low on light-sleep entry, which on this board releases
+  // the battery latch and hard-powers the device off. Drive the latch high and pad-hold it; the hold stays enabled
+  // while running and is only released in startDeepSleep(). Level before direction so the pad never glitches low.
+  gpio_set_level(GPIO_BATTERY_LATCH, 1);
+  gpio_set_direction(GPIO_BATTERY_LATCH, GPIO_MODE_OUTPUT);
+  gpio_hold_en(GPIO_BATTERY_LATCH);
+
+  const esp_err_t err = esp_light_sleep_start();
+
+  // Disarm immediately: an armed timer wake would carry over into startDeepSleep(). gpio_wakeup_disable() leaves the
+  // level interrupt type behind, which can livelock a later GPIO ISR service, so clear it explicitly.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  gpio_wakeup_disable(powerPin);
+  gpio_set_intr_type(powerPin, GPIO_INTR_DISABLE);
+
+  if (err != ESP_OK) {
+    LOG_DBG("PWR", "Light sleep rejected: %d", static_cast<int>(err));
+    return false;
+  }
+  return true;
 }
 
 uint16_t HalPowerManager::getBatteryPercentage() const {

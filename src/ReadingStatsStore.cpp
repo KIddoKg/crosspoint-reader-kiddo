@@ -1,6 +1,9 @@
 #include "ReadingStatsStore.h"
+#include <Arduino.h>
 #include <time.h>
 #include <algorithm>
+#include "CrossPointSettings.h"
+#include "activities/reader/FurthestProgress.h"
 #include "util/TimeManager.h"
 #include "JsonSettingsIO.h"
 #include "HalStorage.h"
@@ -28,24 +31,29 @@ uint32_t ReadingStatsStore::getTodayIndex() const {
 }
 
 void ReadingStatsStore::addReadingTime(const std::string& path, const std::string& title, uint32_t minutes, uint8_t progress) {
-    if (minutes == 0) return;
+    if (minutes == 0 || !SETTINGS.readingStatsEnabled) return;
 
     totalMinutes += minutes;
 
-    uint32_t today = getTodayIndex();
-    bool dailyFound = false;
-    for (auto& ds : dailyReadings) {
-        if (ds.dayIndex == today) {
-            ds.minutes += minutes;
-            dailyFound = true;
-            break;
+    // Without a valid clock the day index would be bogus (1970), so only per-day stats are skipped
+    if (TimeManager::getInstance().hasValidClock()) {
+        const uint32_t today = getTodayIndex();
+        bool dailyFound = false;
+        for (auto& ds : dailyReadings) {
+            if (ds.dayIndex == today) {
+                ds.minutes += minutes;
+                dailyFound = true;
+                break;
+            }
         }
-    }
-    if (!dailyFound) {
-        dailyReadings.push_back({today, minutes});
-        // Keep last 30 days of history?
-        if (dailyReadings.size() > 30) {
-            dailyReadings.erase(dailyReadings.begin());
+        if (!dailyFound) {
+            dailyReadings.push_back({today, minutes});
+            // Keep the last 30 days of history: drop the oldest day (the vector is not kept in order)
+            if (dailyReadings.size() > 30) {
+                dailyReadings.erase(std::min_element(
+                    dailyReadings.begin(), dailyReadings.end(),
+                    [](const DailyStat& a, const DailyStat& b) { return a.dayIndex < b.dayIndex; }));
+            }
         }
     }
 
@@ -121,6 +129,12 @@ uint32_t ReadingStatsStore::getBookMinutes(const std::string& path) const {
     return 0;
 }
 
+uint32_t ReadingStatsStore::getFinishedCount() const {
+    return static_cast<uint32_t>(std::count_if(bookReadings.begin(), bookReadings.end(), [](const BookStat& b) {
+        return b.progress >= FurthestProgress::FINISHED_PERCENT;
+    }));
+}
+
 std::vector<BookStat> ReadingStatsStore::getTopBooks(size_t count) const {
     std::vector<BookStat> sorted = bookReadings;
     std::sort(sorted.begin(), sorted.end(), [](const BookStat& a, const BookStat& b) {
@@ -130,6 +144,32 @@ std::vector<BookStat> ReadingStatsStore::getTopBooks(size_t count) const {
         sorted.resize(count);
     }
     return sorted;
+}
+
+void ReadingStatsStore::notePageTurn() {
+    const unsigned long now = millis();
+    const unsigned long previous = lastPageTurnMs;
+    lastPageTurnMs = now;
+    if (previous == 0) return;
+    // Ignore skimming (< 3 s) and breaks (> 10 min) so the pace reflects actual reading
+    const uint32_t seconds = (now - previous) / 1000;
+    if (seconds < 3 || seconds > 600) return;
+    avgSecondsPerPage = avgSecondsPerPage == 0 ? seconds : (avgSecondsPerPage * 7 + seconds) / 8;
+}
+
+int ReadingStatsStore::estimateMinutes(const uint32_t pages) const {
+    if (avgSecondsPerPage == 0) return -1;
+    return static_cast<int>((pages * avgSecondsPerPage + 59) / 60);
+}
+
+void ReadingStatsStore::reset() {
+    totalMinutes = 0;
+    dailyReadings.clear();
+    bookReadings.clear();
+    currentStreak = 0;
+    lastReadDayIndex = 0;
+    avgSecondsPerPage = 0;
+    saveToFile();
 }
 
 bool ReadingStatsStore::saveToFile() const {

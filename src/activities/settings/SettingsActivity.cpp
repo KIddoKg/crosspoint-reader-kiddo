@@ -12,13 +12,17 @@
 #include "LanguageSelectActivity.h"
 #include "MappedInputManager.h"
 #include "OtaUpdateActivity.h"
+#include "ReadingStatsStore.h"
 #include "SettingsList.h"
+#include "activities/home/ReadingStatsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                              StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
+                                                              StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM,
+                                                              StrId::STR_CAT_EXTRAS};
 
 void SettingsActivity::onEnter() {
   Activity::onEnter();
@@ -28,6 +32,7 @@ void SettingsActivity::onEnter() {
   readerSettings.clear();
   controlsSettings.clear();
   systemSettings.clear();
+  extrasSettings.clear();
 
   for (auto& setting : getSettingsList()) {
     if (setting.category == StrId::STR_NONE_OPT) continue;
@@ -39,6 +44,8 @@ void SettingsActivity::onEnter() {
       controlsSettings.push_back(std::move(setting));
     } else if (setting.category == StrId::STR_CAT_SYSTEM) {
       systemSettings.push_back(std::move(setting));
+    } else if (setting.category == StrId::STR_CAT_EXTRAS) {
+      extrasSettings.push_back(std::move(setting));
     }
     // Web-only categories (KOReader Sync, OPDS Browser) are skipped for device UI
   }
@@ -49,7 +56,6 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_BROWSER, SettingAction::OPDSBrowser));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_FEATURES, SettingAction::Features));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
@@ -57,6 +63,7 @@ void SettingsActivity::onEnter() {
   // Reset selection to first category
   selectedCategoryIndex = 0;
   selectedSettingIndex = 0;
+  pendingConfirmIndex = -1;
 
   // Initialize with first category (Display)
   currentSettings = &displaySettings;
@@ -101,11 +108,13 @@ void SettingsActivity::loop() {
   // Handle navigation
   buttonNavigator.onNextRelease([this] {
     selectedSettingIndex = ButtonNavigator::nextIndex(selectedSettingIndex, settingsCount + 1);
+    pendingConfirmIndex = -1;
     requestUpdate();
   });
 
   buttonNavigator.onPreviousRelease([this] {
     selectedSettingIndex = ButtonNavigator::previousIndex(selectedSettingIndex, settingsCount + 1);
+    pendingConfirmIndex = -1;
     requestUpdate();
   });
 
@@ -123,6 +132,7 @@ void SettingsActivity::loop() {
 
   if (hasChangedCategory) {
     selectedSettingIndex = (selectedSettingIndex == 0) ? 0 : 1;
+    pendingConfirmIndex = -1;
     switch (selectedCategoryIndex) {
       case 0:
         currentSettings = &displaySettings;
@@ -135,6 +145,9 @@ void SettingsActivity::loop() {
         break;
       case 3:
         currentSettings = &systemSettings;
+        break;
+      case 4:
+        currentSettings = &extrasSettings;
         break;
     }
     settingsCount = static_cast<int>(currentSettings->size());
@@ -163,6 +176,9 @@ void SettingsActivity::toggleCurrentSetting() {
     } else {
       SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
     }
+  } else if (setting.type == SettingType::STRING && setting.stringPtr != nullptr) {
+    editStringSetting(setting);
+    return;
   } else if (setting.type == SettingType::ACTION) {
     auto enterSubActivity = [this](Activity* activity) {
       exitActivity();
@@ -204,6 +220,17 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::Language:
         enterSubActivity(new LanguageSelectActivity(renderer, mappedInput, onComplete));
         break;
+      case SettingAction::ReadingStats:
+        enterSubActivity(new ReadingStatsActivity(renderer, mappedInput, onComplete));
+        break;
+      case SettingAction::ResetReadingStats:
+        if (pendingConfirmIndex != selectedSetting) {
+          pendingConfirmIndex = selectedSetting;
+          return;
+        }
+        pendingConfirmIndex = -1;
+        READING_STATS.reset();
+        return;
       case SettingAction::None:
         // Do nothing
         break;
@@ -213,6 +240,25 @@ void SettingsActivity::toggleCurrentSetting() {
   }
 
   SETTINGS.saveToFile();
+}
+
+void SettingsActivity::editStringSetting(const SettingInfo& setting) {
+  char* target = setting.stringPtr;
+  const size_t maxLen = setting.stringMaxLen;
+  exitActivity();
+  enterNewActivity(new KeyboardEntryActivity(
+      renderer, mappedInput, I18N.get(setting.nameId), target, maxLen - 1, false,
+      [this, target, maxLen](const std::string& value) {
+        strncpy(target, value.c_str(), maxLen - 1);
+        target[maxLen - 1] = '\0';
+        SETTINGS.saveToFile();
+        exitActivity();
+        requestUpdate();
+      },
+      [this]() {
+        exitActivity();
+        requestUpdate();
+      }));
 }
 
 void SettingsActivity::render(Activity::RenderLock&&) {
@@ -242,9 +288,12 @@ void SettingsActivity::render(Activity::RenderLock&&) {
                          metrics.verticalSpacing * 2)},
       settingsCount, selectedSettingIndex - 1,
       [&settings](int index) { return std::string(I18N.get(settings[index].nameId)); }, nullptr, nullptr,
-      [&settings](int i) {
+      [this, &settings](int i) {
         const auto& setting = settings[i];
         std::string valueText = "";
+        if (i == pendingConfirmIndex) {
+          return std::string(tr(STR_PRESS_AGAIN_TO_CONFIRM));
+        }
         if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
           const bool value = SETTINGS.*(setting.valuePtr);
           valueText = value ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
@@ -253,6 +302,8 @@ void SettingsActivity::render(Activity::RenderLock&&) {
           valueText = I18N.get(setting.enumValues[value]);
         } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
           valueText = std::to_string(SETTINGS.*(setting.valuePtr));
+        } else if (setting.type == SettingType::STRING && setting.stringPtr != nullptr) {
+          valueText = setting.stringPtr[0] ? setting.stringPtr : tr(STR_AUTO_DETECT);
         }
         return valueText;
       },

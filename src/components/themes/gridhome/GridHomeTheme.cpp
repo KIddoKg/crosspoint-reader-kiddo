@@ -22,6 +22,7 @@
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
 #include "fontIds.h"
+#include "activities/reader/FurthestProgress.h"
 #include "util/TimeManager.h"
 
 namespace {
@@ -47,6 +48,8 @@ const uint8_t* iconForName(UIIcon icon) {
   }
 }
 }  // namespace
+
+const uint8_t* GridHomeTheme::menuIcon(const UIIcon icon) { return iconForName(icon); }
 
 void GridHomeTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                         const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
@@ -235,10 +238,12 @@ void GridHomeTheme::drawRecentBooksList(GfxRenderer& renderer, Rect rect, const 
     auto title = renderer.truncatedText(UI_10_FONT_ID, recentBooks[i].title.c_str(), coverWidth);
     renderer.drawText(UI_10_FONT_ID, coverX, titleY, title.c_str(), true);
 
-    // Draw progress bar below title
+    // Draw progress bar below title: filled up to the furthest point read, with a tick at the current position
+    // when the reader went back (e.g. re-reading an earlier chapter)
     const int progressY = titleY + titleAreaHeight - 4;
     const int progressWidth = coverWidth;
-    const int filledWidth = progressWidth * recentBooks[i].progress / 100;
+    const uint8_t furthest = std::max(recentBooks[i].furthest, recentBooks[i].progress);
+    const int filledWidth = progressWidth * furthest / 100;
 
     // Progress bar outline
     renderer.drawRect(coverX, progressY, progressWidth, progressBarHeight);
@@ -246,18 +251,30 @@ void GridHomeTheme::drawRecentBooksList(GfxRenderer& renderer, Rect rect, const 
     if (filledWidth > 0) {
       renderer.fillRect(coverX + 1, progressY + 1, filledWidth - 2, progressBarHeight - 2);
     }
-
-    uint32_t mins = READING_STATS.getBookMinutes(recentBooks[i].path);
-    char timeBuf[32];
-    if (mins >= 1440) { // More than 24h: show "Xd Yh" or just "Xh"
-      snprintf(timeBuf, sizeof(timeBuf), "%dh", (int)(mins / 60));
-    } else if (mins >= 60) {
-      snprintf(timeBuf, sizeof(timeBuf), tr(STR_HOURS_MINUTES), mins / 60, mins % 60);
-    } else {
-      snprintf(timeBuf, sizeof(timeBuf), tr(STR_MINUTES_VSHORT), mins);
+    if (recentBooks[i].progress < furthest) {
+      const int markerX = std::max(coverX + 1, coverX + progressWidth * recentBooks[i].progress / 100 - 1);
+      renderer.fillRect(markerX, progressY + 1, 2, progressBarHeight - 2, false);
+      renderer.fillRect(markerX, progressY - 3, 2, 3);
+      renderer.fillRect(markerX, progressY + progressBarHeight, 2, 3);
     }
-    int timeWidth = renderer.getTextWidth(UI_10_FONT_ID, timeBuf);
-    renderer.drawText(UI_10_FONT_ID, coverX + progressWidth - timeWidth, progressY + progressBarHeight + 4, timeBuf);
+    if (furthest >= FurthestProgress::FINISHED_PERCENT) {
+      renderer.drawText(UI_10_FONT_ID, coverX, progressY + progressBarHeight + 4, tr(STR_BOOK_FINISHED), true,
+                        EpdFontFamily::BOLD);
+    }
+
+    if (SETTINGS.readingStatsEnabled) {
+      uint32_t mins = READING_STATS.getBookMinutes(recentBooks[i].path);
+      char timeBuf[32];
+      if (mins >= 1440) { // More than 24h: show "Xd Yh" or just "Xh"
+        snprintf(timeBuf, sizeof(timeBuf), "%dh", (int)(mins / 60));
+      } else if (mins >= 60) {
+        snprintf(timeBuf, sizeof(timeBuf), tr(STR_HOURS_MINUTES), mins / 60, mins % 60);
+      } else {
+        snprintf(timeBuf, sizeof(timeBuf), tr(STR_MINUTES_VSHORT), mins);
+      }
+      int timeWidth = renderer.getTextWidth(UI_10_FONT_ID, timeBuf);
+      renderer.drawText(UI_10_FONT_ID, coverX + progressWidth - timeWidth, progressY + progressBarHeight + 4, timeBuf);
+    }
   }
 
   // Draw page indicators if there are multiple pages

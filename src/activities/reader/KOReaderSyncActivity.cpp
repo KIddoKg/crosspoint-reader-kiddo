@@ -1,4 +1,5 @@
 #include "KOReaderSyncActivity.h"
+#include "util/BackgroundTimeSync.h"
 
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -182,6 +183,7 @@ void KOReaderSyncActivity::performUpload() {
 
 void KOReaderSyncActivity::onEnter() {
   ActivityWithSubactivity::onEnter();
+  BackgroundTimeSync::stop();  // take WiFi over from a background clock sync, if one is running
 
   // Check for credentials first
   if (!KOREADER_STORE.hasCredentials()) {
